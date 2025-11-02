@@ -1,103 +1,313 @@
-import React, { useEffect, useState, useRef, useCallback } from 'react';
-import { useParams, useNavigate } from 'react-router-dom';
-import { useAuthStore } from '../auth/auth';
-import { useProjectStore } from '../stores/projectstore';
+import React, { useState, useEffect, useRef ,useCallback} from "react";
+import { useParams, useNavigate } from "react-router-dom";
+import { EditorContent, useEditor } from "@tiptap/react";
 import { supabase } from '../config/supabaseClient';
-import { 
-  Save, 
-  Clock, 
-  Users, 
-  ArrowLeft,
-  Bold,
-  Italic,
-  Underline,
-  Code,
-  List,
-  ListOrdered,
-  CheckSquare,
-  Heading1,
-  Heading2,
-  Heading3,
-  Quote,
-  Link as LinkIcon,
-  Image as ImageIcon,
-  Table,
-  AtSign,
-  Minus,
-  MoreVertical,
-  Eye,
-  History,
-  Share2
-} from 'lucide-react';
+import { getEditorExtensions, editorProps } from '../components/editor/editorConfig';
+import { useCollaboration } from '../utils/useCollaboration';
+import { hasPermission } from '../utils/permissions';
+import EditorToolbar from '../components/editor/EditorToolbar';
+import EditorHeader from '../components/editor/EditorHeader';
+import EditorPreview from '../components/editor/EditorPreview';
+import VersionHistoryModal from '../components/editor/VersionHistoryModal';
+import Breadcrumbs from '../components/editor/Breadcrumbs';
+import { useToast } from "../components/toast";
+import './css/collaboration-cursor.css';
 
+const COLORS = ['#FF6B6B', '#4ECDC4', '#45B7D1', '#FFA07A', '#98D8C8', '#F7DC6F'];
+const getRandomColor = () => COLORS[Math.floor(Math.random() * COLORS.length)];
+function CollaborativeEditor({ 
+  doc, 
+  mentionUsers, 
+  canEdit, 
+  onUpdate, 
+  editorInstance, 
+  cursorPositions, 
+  broadcastCursor 
+}) {
+  // Store cursor positions in a ref so it doesn't cause re-renders
+  const cursorRef = useRef(cursorPositions);
+  
+  useEffect(() => {
+    cursorRef.current = cursorPositions;
+  }, [cursorPositions]);
+
+  // Create editor WITHOUT cursorPositions in dependencies
+  const editor = useEditor({
+    extensions: getEditorExtensions(doc, mentionUsers, {
+      cursors: cursorRef.current,
+      onCursorUpdate: broadcastCursor,
+    }),
+    editorProps,
+    editable: canEdit,
+    autofocus: canEdit,
+    onUpdate: ({ editor }) => {
+      if (canEdit) {
+        onUpdate(editor.getHTML());
+      }
+    },
+  }, [doc, mentionUsers, broadcastCursor]); // NO cursorPositions here!
+
+  // Manually update the extension when cursors change
+  useEffect(() => {
+    if (!editor) return;
+    
+    console.log('🔄 Updating cursor positions:', cursorPositions);
+    
+    const cursorsExt = editor.extensionManager.extensions.find(
+      ext => ext.name === 'customCursors'
+    );
+    
+    if (cursorsExt) {
+      cursorsExt.options.cursors = cursorPositions;
+      // Force decoration update
+      const tr = editor.state.tr;
+      editor.view.dispatch(tr);
+    }
+  }, [editor, cursorPositions]);
+
+  // Pass editor instance to parent
+  useEffect(() => {
+    if (editor && editorInstance) {
+      editorInstance.current = editor;
+    }
+  }, [editor, editorInstance]);
+
+  useEffect(() => {
+    if (editor && editor.isEditable !== canEdit) {
+      editor.setEditable(canEdit);
+    }
+  }, [editor, canEdit]);
+
+  if (!editor) {
+    return (
+      <div className="flex items-center justify-center p-12">
+        <div className="text-center">
+          <div className="w-12 h-12 border-4 border-blue-600 border-t-transparent rounded-full animate-spin mx-auto mb-3"></div>
+          <p className="text-gray-600">Loading editor...</p>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <>
+      <EditorToolbar 
+        editor={editor} 
+      />
+      <div className="flex-1 overflow-y-auto">
+        <EditorContent editor={editor} />
+      </div>
+    </>
+  );
+}
 export default function PageEditor() {
   const { projectId, pageId } = useParams();
   const navigate = useNavigate();
-  const { profile } = useAuthStore();
-  const { currentProject, pages, updatePage } = useProjectStore();
+  const toast = useToast();
   
   const [page, setPage] = useState(null);
-  const [content, setContent] = useState('');
   const [title, setTitle] = useState('');
+  const [currentUser, setCurrentUser] = useState(null);
+  const [mentionUsers, setMentionUsers] = useState([]);
+  const [currentUserRole, setCurrentUserRole] = useState(null);
   const [saving, setSaving] = useState(false);
   const [lastSaved, setLastSaved] = useState(null);
-  const [activeUsers, setActiveUsers] = useState([]);
   const [showVersionHistory, setShowVersionHistory] = useState(false);
+  const [showPreview, setShowPreview] = useState(true);
   const [versions, setVersions] = useState([]);
+  const [breadcrumbs, setBreadcrumbs] = useState([]);
+  const [isOnline, setIsOnline] = useState(navigator.onLine);
   
-  const editorRef = useRef(null);
+  const userColor = useRef(getRandomColor());
   const saveTimeoutRef = useRef(null);
-  const presenceChannelRef = useRef(null);
+  const editorContentRef = useRef('');
+  const editorRef = useRef(null);
 
+  const { doc, activeUsers, cursorPositions,isReady: collabReady ,broadcastCursor } = useCollaboration(
+    pageId,
+    currentUser
+  );
+
+  // Online status tracking
   useEffect(() => {
-    const currentPage = pages.find(p => p.id === pageId);
-    if (currentPage) {
-      setPage(currentPage);
-      setTitle(currentPage.title);
-      setContent(currentPage.content || '');
-    }
-  }, [pageId, pages]);
-
-  useEffect(() => {
-    if (pageId && profile?.id) {
-      setupPresence();
-      loadVersionHistory();
-    }
-
-    return () => {
-      if (presenceChannelRef.current) {
-        supabase.removeChannel(presenceChannelRef.current);
+    const handleOnline = () => {
+      setIsOnline(true);
+      if (toast?.success) {
+        toast.success('You are back online');
       }
     };
-  }, [pageId, profile?.id]);
+    
+    const handleOffline = () => {
+      setIsOnline(false);
+      if (toast?.error) {
+        toast.error('You are offline. Changes will sync when back online.');
+      }
+    };
+    
+    window.addEventListener('online', handleOnline);
+    window.addEventListener('offline', handleOffline);
+    
+    // Check connection status periodically
+    const checkConnection = setInterval(() => {
+      setIsOnline(navigator.onLine);
+    }, 5000);
+    
+    return () => {
+      window.removeEventListener('online', handleOnline);
+      window.removeEventListener('offline', handleOffline);
+      clearInterval(checkConnection);
+    };
+  }, []);
 
-  const setupPresence = () => {
-    const channel = supabase.channel(`page:${pageId}:presence`, {
-      config: {
-        presence: {
-          key: profile.id,
-        },
-      },
-    });
-
-    channel
-      .on('presence', { event: 'sync' }, () => {
-        const state = channel.presenceState();
-        const users = Object.values(state).flat().filter(u => u.user_id !== profile.id);
-        setActiveUsers(users);
-      })
-      .subscribe(async (status) => {
-        if (status === 'SUBSCRIBED') {
-          await channel.track({
-            user_id: profile.id,
-            user_name: profile.full_name,
-            avatar_url: profile.avatar_url,
-            online_at: new Date().toISOString(),
-          });
+  useEffect(() => {
+    const init = async () => {
+      try {
+        const { data: { user } } = await supabase.auth.getUser();
+        if (!user) {
+          toast?.error('Please login to access this page');
+          navigate('/login');
+          return;
         }
+
+        const { data: profile, error: profileError } = await supabase
+          .from('profiles')
+          .select('*')
+          .eq('id', user.id)
+          .single();
+
+        if (profileError) {
+          console.error('Profile error:', profileError);
+          toast?.error('Failed to load user profile');
+          return;
+        }
+
+        setCurrentUser(prev => {
+  if (!prev || prev.id !== profile.id) {
+    return { ...profile, color: userColor.current };
+  }
+  return prev;
+});
+
+        const { data: pageData, error: pageError } = await supabase
+          .from('pages')
+          .select('*')
+          .eq('id', pageId)
+          .single();
+
+        if (pageError) {
+          console.error('Page error:', pageError);
+          toast?.error('Failed to load page');
+          return;
+        }
+
+        setPage(pageData);
+        setTitle(pageData.title || 'Untitled Page');
+        
+        // Store initial content
+        if (pageData.content) {
+          editorContentRef.current = typeof pageData.content === 'string' 
+            ? pageData.content 
+            : (pageData.content.content || '');
+        }
+
+        const { data: roleData } = await supabase
+          .from('project_members')
+          .select('role')
+          .eq('project_id', projectId)
+          .eq('user_id', user.id)
+          .single();
+
+        setCurrentUserRole(roleData?.role || 'viewer');
+
+        const { data: members } = await supabase
+          .from('project_members')
+          .select(`
+            user_id,
+            profiles:user_id (
+              id,
+              full_name,
+              email,
+              avatar_url
+            )
+          `)
+          .eq('project_id', projectId);
+
+        const users = members?.map(m => ({
+          id: m.profiles.id,
+          label: m.profiles.full_name || m.profiles.email,
+          avatar: m.profiles.avatar_url,
+        })) || [];
+
+        setMentionUsers(users);
+        console.log('✅ Loaded mention users:', users);
+
+        // Load breadcrumbs
+        await loadBreadcrumbs(pageData);
+        
+        // Load version history
+        await loadVersionHistory();
+
+      } catch (error) {
+        console.error('Init error:', error);
+        toast?.error('Failed to initialize editor');
+      }
+    };
+
+    if (pageId && projectId) init();
+  }, [pageId, projectId, navigate]);
+
+  const loadBreadcrumbs = async (pageData) => {
+    try {
+      const crumbs = [];
+      
+      const { data: project } = await supabase
+        .from('projects')
+        .select('name')
+        .eq('id', projectId)
+        .single();
+
+      crumbs.push({ 
+        id: 'project', 
+        title: project?.name || 'Project', 
+        path: `/project/${projectId}` 
       });
 
-    presenceChannelRef.current = channel;
+      let currentPage = pageData;
+      const parentPages = [];
+
+      while (currentPage.parent_id) {
+        const { data: parentPage } = await supabase
+          .from('pages')
+          .select('id, title, parent_id')
+          .eq('id', currentPage.parent_id)
+          .single();
+        
+        if (parentPage) {
+          parentPages.unshift(parentPage);
+          currentPage = parentPage;
+        } else {
+          break;
+        }
+      }
+
+      parentPages.forEach(parent => {
+        crumbs.push({
+          id: parent.id,
+          title: parent.title,
+          path: `/project/${projectId}/page/${parent.id}`
+        });
+      });
+
+      crumbs.push({ 
+        id: 'page', 
+        title: pageData.title || 'Untitled Page', 
+        path: null 
+      });
+
+      setBreadcrumbs(crumbs);
+    } catch (error) {
+      console.error('Error loading breadcrumbs:', error);
+    }
   };
 
   const loadVersionHistory = async () => {
@@ -106,169 +316,220 @@ export default function PageEditor() {
         .from('page_versions')
         .select(`
           *,
-          created_by_profile:profiles!created_by(full_name, avatar_url)
+          profiles:created_by (
+            id,
+            full_name,
+            email,
+            avatar_url
+          )
         `)
         .eq('page_id', pageId)
         .order('created_at', { ascending: false })
         .limit(20);
 
-      if (!error && data) {
+      if (error) {
+        console.error('Error loading versions:', error);
+        return;
+      }
+      
+      if (data) {
         setVersions(data);
+        console.log('✅ Loaded versions:', data.length);
       }
     } catch (error) {
       console.error('Error loading versions:', error);
     }
   };
 
-  const handleContentChange = (newContent) => {
-    setContent(newContent);
-    
+  const handleContentUpdate = (content) => {
+    if (!hasPermission(currentUserRole, 'canEditPages')) return;
+
+    editorContentRef.current = content;
+
     if (saveTimeoutRef.current) {
       clearTimeout(saveTimeoutRef.current);
     }
 
-    saveTimeoutRef.current = setTimeout(() => {
-      handleSave(newContent);
+    setSaving(true);
+    saveTimeoutRef.current = setTimeout(async () => {
+      try {
+        const { error } = await supabase
+          .from('pages')
+          .update({
+            content,
+            updated_at: new Date().toISOString(),
+          })
+          .eq('id', pageId);
+
+        if (error) throw error;
+        
+        setLastSaved(new Date());
+        console.log('💾 Saved');
+      } catch (error) {
+        console.error('Save error:', error);
+        toast?.error('Failed to save changes');
+      } finally {
+        setSaving(false);
+      }
     }, 2000);
   };
 
-  const handleTitleChange = (newTitle) => {
+  const handleTitleChange = async (newTitle) => {
     setTitle(newTitle);
-    
-    if (saveTimeoutRef.current) {
-      clearTimeout(saveTimeoutRef.current);
-    }
-
-    saveTimeoutRef.current = setTimeout(() => {
-      handleSave(content, newTitle);
-    }, 1000);
-  };
-
-  const handleSave = async (contentToSave = content, titleToSave = title) => {
-    try {
-      setSaving(true);
-      
-      await updatePage(pageId, {
-        content: contentToSave,
-        title: titleToSave,
-        updated_at: new Date().toISOString()
-      });
-
-      const shouldCreateVersion = Math.random() < 0.3;
-      if (shouldCreateVersion) {
-        await supabase.from('page_versions').insert({
-          page_id: pageId,
-          content: contentToSave,
-          created_by: profile.id
-        });
-        await loadVersionHistory();
+    if (hasPermission(currentUserRole, 'canEditPages')) {
+      try {
+        await supabase
+          .from('pages')
+          .update({ 
+            title: newTitle,
+            updated_at: new Date().toISOString()
+          })
+          .eq('id', pageId);
+      } catch (error) {
+        console.error('Error updating title:', error);
+        toast?.error('Failed to update title');
       }
-
-      setLastSaved(new Date());
-      setSaving(false);
-    } catch (error) {
-      console.error('Error saving page:', error);
-      setSaving(false);
     }
   };
 
   const handleRestoreVersion = async (version) => {
-    if (confirm('Restore this version? Current content will be saved as a new version.')) {
-      try {
-        await supabase.from('page_versions').insert({
-          page_id: pageId,
-          content: content,
-          created_by: profile.id
-        });
+    if (!window.confirm('Restore this version? Current content will be saved as a new version.')) return;
 
-        setContent(version.content);
-        await handleSave(version.content);
-        setShowVersionHistory(false);
-      } catch (error) {
-        console.error('Error restoring version:', error);
-      }
-    }
-  };
-
-  const insertFormatting = (format) => {
-    const editor = editorRef.current;
-    if (!editor) return;
-
-    const start = editor.selectionStart;
-    const end = editor.selectionEnd;
-    const selectedText = content.substring(start, end);
-    let newText = '';
-    let cursorOffset = 0;
-
-    switch (format) {
-      case 'bold':
-        newText = `**${selectedText}**`;
-        cursorOffset = selectedText ? newText.length : 2;
-        break;
-      case 'italic':
-        newText = `*${selectedText}*`;
-        cursorOffset = selectedText ? newText.length : 1;
-        break;
-      case 'code':
-        newText = `\`${selectedText}\``;
-        cursorOffset = selectedText ? newText.length : 1;
-        break;
-      case 'h1':
-        newText = `# ${selectedText}`;
-        cursorOffset = newText.length;
-        break;
-      case 'h2':
-        newText = `## ${selectedText}`;
-        cursorOffset = newText.length;
-        break;
-      case 'h3':
-        newText = `### ${selectedText}`;
-        cursorOffset = newText.length;
-        break;
-      case 'ul':
-        newText = `- ${selectedText}`;
-        cursorOffset = newText.length;
-        break;
-      case 'ol':
-        newText = `1. ${selectedText}`;
-        cursorOffset = newText.length;
-        break;
-      case 'checkbox':
-        newText = `- [ ] ${selectedText}`;
-        cursorOffset = newText.length;
-        break;
-      case 'quote':
-        newText = `> ${selectedText}`;
-        cursorOffset = newText.length;
-        break;
-      case 'divider':
-        newText = '\n---\n';
-        cursorOffset = newText.length;
-        break;
-      case 'link':
-        newText = `[${selectedText || 'link text'}](url)`;
-        cursorOffset = selectedText ? newText.length - 4 : 1;
-        break;
-      default:
+    try {
+      if (!currentUser?.id) {
+        toast?.error('Unable to restore version');
         return;
+      }
+
+      if (!editorRef.current) {
+        toast?.error('Editor not ready');
+        return;
+      }
+
+      // Save current version first
+      const { data: maxVersion } = await supabase
+        .from('page_versions')
+        .select('version_number')
+        .eq('page_id', pageId)
+        .order('version_number', { ascending: false })
+        .limit(1)
+        .single();
+
+      const nextVersionNumber = (maxVersion?.version_number || 0) + 1;
+
+      await supabase.from('page_versions').insert({
+        page_id: pageId,
+        title: title,
+        content: editorContentRef.current,
+        created_by: currentUser.id,
+        version_number: nextVersionNumber
+      });
+
+      // Restore selected version
+      const restoredContent = typeof version.content === 'string' 
+        ? version.content 
+        : (version.content?.content || '');
+      
+      // Update database
+      await supabase
+        .from('pages')
+        .update({
+          content: restoredContent,
+          title: version.title,
+          updated_at: new Date().toISOString(),
+        })
+        .eq('id', pageId);
+      
+      // Update editor
+      if (editorRef.current) {
+        editorRef.current.commands.setContent(restoredContent);
+      }
+      
+      setTitle(version.title);
+      editorContentRef.current = restoredContent;
+      setShowVersionHistory(false);
+      
+      // Reload version history
+      await loadVersionHistory();
+      
+      toast?.success('Version restored successfully');
+    } catch (error) {
+      console.error('Error restoring version:', error);
+      toast?.error('Failed to restore version');
     }
-
-    const newContent = content.substring(0, start) + newText + content.substring(end);
-    setContent(newContent);
-    handleContentChange(newContent);
-
-    setTimeout(() => {
-      editor.focus();
-      editor.setSelectionRange(start + cursorOffset, start + cursorOffset);
-    }, 0);
   };
 
-  if (!page) {
+  const handleImageUpload = async () => {
+    if (!currentUser) {
+      toast?.error("You must be logged in to upload images");
+      return;
+    }
+
+    if (!editorRef.current) {
+      toast?.error("Editor not ready");
+      return;
+    }
+    
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = 'image/*';
+    input.onchange = async (e) => {
+      const file = e.target.files[0];
+      if (!file) return;
+
+      try {
+        toast?.info?.('Uploading image...');
+        
+        const fileExt = file.name.split('.').pop();
+        const fileName = `${Date.now()}-${Math.random().toString(36).substring(7)}.${fileExt}`;
+        const filePath = `${pageId}/${fileName}`;
+
+        const { error: uploadError } = await supabase.storage
+          .from('page-images')
+          .upload(filePath, file);
+
+        if (uploadError) throw uploadError;
+
+        const { data: { publicUrl } } = supabase.storage
+          .from('page-images')
+          .getPublicUrl(filePath);
+
+        // Insert image into editor
+        if (editorRef.current) {
+          editorRef.current.chain().focus().setImage({ src: publicUrl }).run();
+          toast?.success('Image uploaded successfully');
+        }
+      } catch (error) {
+        console.error('Image upload failed:', error);
+        toast?.error('Failed to upload image');
+      }
+    };
+    input.click();
+  };
+
+  const handleShare = () => {
+    const shareUrl = window.location.href;
+    if (navigator.share) {
+      navigator.share({ title, url: shareUrl })
+        .catch(() => {
+          navigator.clipboard.writeText(shareUrl);
+          toast?.success('Link copied to clipboard!');
+        });
+    } else {
+      navigator.clipboard.writeText(shareUrl);
+      toast?.success('Link copied to clipboard!');
+    }
+  };
+
+  const canEdit = hasPermission(currentUserRole, 'canEditPages');
+
+  if (!currentUser || !collabReady || !doc) {
     return (
-      <div className="min-h-screen flex items-center justify-center">
+      <div className="min-h-screen flex items-center justify-center bg-gray-50">
         <div className="text-center">
           <div className="w-16 h-16 border-4 border-blue-600 border-t-transparent rounded-full animate-spin mx-auto mb-4"></div>
-          <p className="text-gray-600">Loading page...</p>
+          <p className="text-gray-900 font-semibold text-lg mb-2">Loading Editor</p>
+          <p className="text-gray-500 text-sm">Setting up collaboration...</p>
         </div>
       </div>
     );
@@ -282,31 +543,58 @@ export default function PageEditor() {
         saving={saving}
         lastSaved={lastSaved}
         activeUsers={activeUsers}
+        currentUser={currentUser}
         onBack={() => navigate(`/project/${projectId}`)}
         onVersionHistory={() => setShowVersionHistory(true)}
+        showPreview={showPreview}
+        onTogglePreview={() => setShowPreview(!showPreview)}
+        isOnline={isOnline}
+        onShare={handleShare}
+        canEdit={canEdit}
       />
 
-      <EditorToolbar onFormat={insertFormatting} />
+      <div className="bg-white border-b border-gray-200 px-6">
+        <Breadcrumbs 
+          items={breadcrumbs} 
+          onNavigate={(path) => path && navigate(path)} 
+        />
+      </div>
+
+      {!canEdit && (
+        <div className="bg-yellow-50 border-b border-yellow-200 px-6 py-2">
+          <p className="text-sm text-yellow-800">
+            🔒 You are viewing this page in read-only mode
+          </p>
+        </div>
+      )}
+
+      {!isOnline && (
+        <div className="bg-orange-50 border-b border-orange-200 px-6 py-2">
+          <p className="text-sm text-orange-800">
+            📡 You are offline. Changes will sync when connection is restored.
+          </p>
+        </div>
+      )}
 
       <div className="flex-1 overflow-hidden flex">
-        <div className="flex-1 overflow-y-auto">
-          <div className="max-w-4xl mx-auto py-8 px-6">
-            <textarea
-              ref={editorRef}
-              value={content}
-              onChange={(e) => handleContentChange(e.target.value)}
-              placeholder="Start typing... Use markdown for formatting"
-              className="w-full min-h-[600px] p-6 bg-white rounded-xl border border-gray-200 focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none resize-none font-mono text-sm leading-relaxed"
-            />
-          </div>
+        <div className={`${showPreview ? 'w-1/2' : 'w-full'} flex flex-col border-r border-gray-200 bg-white transition-all duration-300`}>
+          <CollaborativeEditor
+  doc={doc}
+  mentionUsers={mentionUsers}
+  canEdit={canEdit}
+  onUpdate={handleContentUpdate}
+  editorInstance={editorRef}
+  cursorPositions={cursorPositions}
+  broadcastCursor={broadcastCursor}
+/>
         </div>
 
-        <div className="w-96 border-l border-gray-200 bg-white p-6 overflow-y-auto">
-          <h3 className="font-semibold text-gray-900 mb-4">Preview</h3>
-          <div className="prose prose-sm max-w-none">
-            <MarkdownPreview content={content} />
-          </div>
-        </div>
+        {showPreview && (
+          <EditorPreview 
+            title={title} 
+            content={editorContentRef.current} 
+          />
+        )}
       </div>
 
       {showVersionHistory && (
@@ -314,250 +602,8 @@ export default function PageEditor() {
           versions={versions}
           onClose={() => setShowVersionHistory(false)}
           onRestore={handleRestoreVersion}
-          currentContent={content}
         />
       )}
-    </div>
-  );
-}
-
-function EditorHeader({ title, onTitleChange, saving, lastSaved, activeUsers, onBack, onVersionHistory }) {
-  return (
-    <header className="bg-white border-b border-gray-200 px-6 py-4">
-      <div className="flex items-center justify-between mb-3">
-        <div className="flex items-center gap-3">
-          <button
-            onClick={onBack}
-            className="p-2 hover:bg-gray-100 rounded-lg transition"
-          >
-            <ArrowLeft className="w-5 h-5 text-gray-600" />
-          </button>
-
-          <input
-            type="text"
-            value={title}
-            onChange={(e) => onTitleChange(e.target.value)}
-            className="text-2xl font-bold text-gray-900 bg-transparent border-none outline-none focus:ring-0"
-            placeholder="Untitled Page"
-          />
-        </div>
-
-        <div className="flex items-center gap-4">
-          <div className="flex items-center gap-2">
-            {saving ? (
-              <div className="flex items-center gap-2 text-sm text-gray-600">
-                <div className="w-4 h-4 border-2 border-blue-600 border-t-transparent rounded-full animate-spin"></div>
-                Saving...
-              </div>
-            ) : lastSaved ? (
-              <div className="flex items-center gap-2 text-sm text-gray-600">
-                <Save className="w-4 h-4 text-green-600" />
-                Saved {lastSaved.toLocaleTimeString()}
-              </div>
-            ) : null}
-          </div>
-
-          {activeUsers.length > 0 && (
-            <div className="flex items-center gap-2">
-              <div className="flex -space-x-2">
-                {activeUsers.slice(0, 3).map((user, i) => (
-                  <div
-                    key={i}
-                    className="w-8 h-8 rounded-full bg-gradient-to-br from-blue-500 to-purple-500 border-2 border-white flex items-center justify-center text-white text-xs font-medium"
-                    title={user.user_name}
-                  >
-                    {user.user_name?.[0]?.toUpperCase() || 'U'}
-                  </div>
-                ))}
-              </div>
-              {activeUsers.length > 3 && (
-                <span className="text-sm text-gray-600">+{activeUsers.length - 3}</span>
-              )}
-            </div>
-          )}
-
-          <button
-            onClick={onVersionHistory}
-            className="flex items-center gap-2 px-3 py-2 text-gray-700 hover:bg-gray-100 rounded-lg transition"
-          >
-            <History className="w-4 h-4" />
-            <span className="text-sm">History</span>
-          </button>
-
-          <button className="flex items-center gap-2 px-3 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition">
-            <Share2 className="w-4 h-4" />
-            <span className="text-sm">Share</span>
-          </button>
-        </div>
-      </div>
-    </header>
-  );
-}
-
-function EditorToolbar({ onFormat }) {
-  return (
-    <div className="bg-white border-b border-gray-200 px-6 py-2">
-      <div className="flex items-center gap-1">
-        <ToolbarButton icon={<Bold />} onClick={() => onFormat('bold')} title="Bold" />
-        <ToolbarButton icon={<Italic />} onClick={() => onFormat('italic')} title="Italic" />
-        <ToolbarButton icon={<Code />} onClick={() => onFormat('code')} title="Code" />
-        
-        <div className="w-px h-6 bg-gray-300 mx-2" />
-        
-        <ToolbarButton icon={<Heading1 />} onClick={() => onFormat('h1')} title="Heading 1" />
-        <ToolbarButton icon={<Heading2 />} onClick={() => onFormat('h2')} title="Heading 2" />
-        <ToolbarButton icon={<Heading3 />} onClick={() => onFormat('h3')} title="Heading 3" />
-        
-        <div className="w-px h-6 bg-gray-300 mx-2" />
-        
-        <ToolbarButton icon={<List />} onClick={() => onFormat('ul')} title="Bullet List" />
-        <ToolbarButton icon={<ListOrdered />} onClick={() => onFormat('ol')} title="Numbered List" />
-        <ToolbarButton icon={<CheckSquare />} onClick={() => onFormat('checkbox')} title="Checkbox" />
-        
-        <div className="w-px h-6 bg-gray-300 mx-2" />
-        
-        <ToolbarButton icon={<Quote />} onClick={() => onFormat('quote')} title="Quote" />
-        <ToolbarButton icon={<LinkIcon />} onClick={() => onFormat('link')} title="Link" />
-        <ToolbarButton icon={<Minus />} onClick={() => onFormat('divider')} title="Divider" />
-      </div>
-    </div>
-  );
-}
-
-function ToolbarButton({ icon, onClick, title }) {
-  return (
-    <button
-      onClick={onClick}
-      title={title}
-      className="p-2 text-gray-600 hover:bg-gray-100 rounded transition"
-    >
-      {React.cloneElement(icon, { className: 'w-4 h-4' })}
-    </button>
-  );
-}
-
-function MarkdownPreview({ content }) {
-  const renderMarkdown = (text) => {
-    let html = text;
-
-    html = html.replace(/^### (.*$)/gim, '<h3 class="text-lg font-bold mt-4 mb-2">$1</h3>');
-    html = html.replace(/^## (.*$)/gim, '<h2 class="text-xl font-bold mt-6 mb-3">$1</h2>');
-    html = html.replace(/^# (.*$)/gim, '<h1 class="text-2xl font-bold mt-8 mb-4">$1</h1>');
-
-    html = html.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
-    html = html.replace(/\*(.*?)\*/g, '<em>$1</em>');
-    html = html.replace(/`(.*?)`/g, '<code class="bg-gray-100 px-1 py-0.5 rounded text-sm">$1</code>');
-
-    html = html.replace(/^\- \[ \] (.*$)/gim, '<div class="flex items-center gap-2"><input type="checkbox" disabled class="rounded"> <span>$1</span></div>');
-    html = html.replace(/^\- \[x\] (.*$)/gim, '<div class="flex items-center gap-2"><input type="checkbox" checked disabled class="rounded"> <span>$1</span></div>');
-    html = html.replace(/^\- (.*$)/gim, '<li class="ml-4">$1</li>');
-    html = html.replace(/^\d+\. (.*$)/gim, '<li class="ml-4 list-decimal">$1</li>');
-
-    html = html.replace(/^> (.*$)/gim, '<blockquote class="border-l-4 border-gray-300 pl-4 italic text-gray-700">$1</blockquote>');
-
-    html = html.replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" class="text-blue-600 hover:underline">$1</a>');
-
-    html = html.replace(/^---$/gim, '<hr class="my-4 border-gray-300">');
-
-    html = html.split('\n').map(line => {
-      if (line.trim() === '') return '<br>';
-      if (line.match(/^<(h[1-3]|li|blockquote|hr|div)/)) return line;
-      return `<p>${line}</p>`;
-    }).join('\n');
-
-    return html;
-  };
-
-  return (
-    <div
-      className="prose-content"
-      dangerouslySetInnerHTML={{ __html: renderMarkdown(content) }}
-    />
-  );
-}
-
-function VersionHistoryModal({ versions, onClose, onRestore, currentContent }) {
-  const [selectedVersion, setSelectedVersion] = useState(null);
-  const [showDiff, setShowDiff] = useState(false);
-
-  return (
-    <div
-      onClick={onClose}
-      className="fixed inset-0 bg-gray-900/30 backdrop-blur-sm flex items-center justify-center z-50 p-4"
-    >
-      <div
-        onClick={(e) => e.stopPropagation()}
-        className="bg-white rounded-2xl shadow-2xl max-w-4xl w-full max-h-[80vh] flex flex-col"
-      >
-        <div className="p-6 border-b border-gray-200">
-          <div className="flex items-center justify-between">
-            <h2 className="text-2xl font-bold text-gray-900">Version History</h2>
-            <button
-              onClick={onClose}
-              className="p-2 hover:bg-gray-100 rounded-lg transition"
-            >
-              <ArrowLeft className="w-5 h-5" />
-            </button>
-          </div>
-        </div>
-
-        <div className="flex-1 overflow-hidden flex">
-          <div className="w-80 border-r border-gray-200 overflow-y-auto">
-            <div className="p-4 space-y-2">
-              {versions.length === 0 ? (
-                <p className="text-center text-gray-500 py-8">No version history</p>
-              ) : (
-                versions.map((version) => (
-                  <button
-                    key={version.id}
-                    onClick={() => setSelectedVersion(version)}
-                    className={`w-full text-left p-3 rounded-lg transition ${
-                      selectedVersion?.id === version.id
-                        ? 'bg-blue-50 border-2 border-blue-500'
-                        : 'bg-gray-50 border-2 border-transparent hover:bg-gray-100'
-                    }`}
-                  >
-                    <div className="flex items-center gap-2 mb-1">
-                      <Clock className="w-4 h-4 text-gray-400" />
-                      <span className="text-sm font-medium text-gray-900">
-                        {new Date(version.created_at).toLocaleString()}
-                      </span>
-                    </div>
-                    <p className="text-xs text-gray-600">
-                      By {version.created_by_profile?.full_name || 'Unknown'}
-                    </p>
-                  </button>
-                ))
-              )}
-            </div>
-          </div>
-
-          <div className="flex-1 overflow-y-auto p-6">
-            {selectedVersion ? (
-              <div>
-                <div className="flex items-center justify-between mb-4">
-                  <h3 className="text-lg font-semibold text-gray-900">Version Preview</h3>
-                  <button
-                    onClick={() => onRestore(selectedVersion)}
-                    className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition"
-                  >
-                    Restore This Version
-                  </button>
-                </div>
-                <div className="bg-gray-50 rounded-lg p-4 border border-gray-200">
-                  <pre className="whitespace-pre-wrap text-sm text-gray-700 font-mono">
-                    {selectedVersion.content}
-                  </pre>
-                </div>
-              </div>
-            ) : (
-              <div className="flex items-center justify-center h-full">
-                <p className="text-gray-500">Select a version to preview</p>
-              </div>
-            )}
-          </div>
-        </div>
-      </div>
     </div>
   );
 }

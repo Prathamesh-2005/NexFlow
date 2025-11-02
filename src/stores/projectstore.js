@@ -1,180 +1,133 @@
 import { create } from 'zustand';
-import { supabase, supabaseHelpers } from '../config/supabaseClient';
+import { supabase } from '../config/supabaseClient';
 
 export const useProjectStore = create((set, get) => ({
-  projects: [],
   currentProject: null,
   pages: [],
-  boards: [],
   activities: [],
   loading: false,
-  error: null,
-  projectChannel: null,
-  presenceChannel: null,
-  isSettingProject: false,
+  subscriptions: [],
 
-  loadProjects: async (userId) => {
-    try {
-      set({ loading: true, error: null });
-      const projects = await supabaseHelpers.getUserProjects(userId);
-      set({ projects, loading: false });
-      return projects;
-    } catch (error) {
-      set({ error: error.message, loading: false });
-      console.error('Error loading projects:', error);
-    }
-  },
-
+  updateUserProfile: (updatedProfile) => {
+  set({ profile: updatedProfile });
+},
   setCurrentProject: async (projectId, userId) => {
-    const state = get();
-    
-    // Prevent concurrent calls
-    if (state.isSettingProject) {
-      console.log('Already setting project, skipping...');
-      return;
-    }
-    
-    // Check if already loaded
-    if (state.currentProject?.id === projectId && state.pages.length > 0) {
-      console.log('Project already set in store');
-      return;
-    }
+    set({ loading: true });
 
     try {
-      set({ isSettingProject: true, loading: true, error: null });
-      
-      let projectDetails = state.projects.find(p => p.id === projectId);
-      
-      if (!projectDetails) {
-        projectDetails = await supabaseHelpers.getProjectDetails(projectId);
-      }
-      
-      const [pages, boards, activities] = await Promise.all([
-        supabaseHelpers.getProjectPages(projectId),
-        supabaseHelpers.getProjectBoards(projectId),
-        supabaseHelpers.getProjectActivities(projectId)
-      ]);
-      
-      set({
-        currentProject: projectDetails,
-        pages: pages || [],
-        boards: boards || [],
+      get().clearSubscriptions();
+
+      const { data: project, error: projectError } = await supabase
+        .from('projects')
+        .select('*')
+        .eq('id', projectId)
+        .single();
+
+      if (projectError) throw projectError;
+
+      const { data: pages, error: pagesError } = await supabase
+        .from('pages')
+        .select('*')
+        .eq('project_id', projectId)
+        .order('position', { ascending: true });
+
+      if (pagesError) throw pagesError;
+
+      const { data: activities, error: activitiesError } = await supabase
+        .from('activities')
+        .select(`
+          *,
+          user:profiles(full_name, avatar_url),
+          page:pages(title)
+        `)
+        .eq('project_id', projectId)
+        .order('created_at', { ascending: false })
+        .limit(20);
+
+      if (activitiesError) throw activitiesError;
+
+      set({ 
+        currentProject: project, 
+        pages: pages || [], 
         activities: activities || [],
-        loading: false,
-        isSettingProject: false
+        loading: false 
       });
 
-      get().subscribeToProject(projectId);
-      
+      get().setupSubscriptions(projectId);
     } catch (error) {
-      set({ error: error.message, loading: false, isSettingProject: false });
-      console.error('Error setting current project:', error);
-    }
-  },
-
-  createProject: async (userId, projectData) => {
-    try {
-      set({ loading: true, error: null });
-      const newProject = await supabaseHelpers.createProject(userId, projectData);
-      
-      set((state) => ({
-        projects: [{ ...newProject, userRole: 'owner' }, ...state.projects],
-        loading: false
-      }));
-      
-      return newProject;
-    } catch (error) {
-      set({ error: error.message, loading: false });
-      console.error('Error creating project:', error);
+      console.error('Error loading project:', error);
+      set({ loading: false });
       throw error;
     }
   },
 
-  subscribeToProject: (projectId) => {
-    const currentChannel = get().projectChannel;
-    if (currentChannel) {
-      supabase.removeChannel(currentChannel);
-    }
+  setupSubscriptions: (projectId) => {
+    const subscriptions = [];
 
-    const channel = supabaseHelpers.subscribeToProject(projectId, (payload) => {
-      console.log('Real-time update:', payload);
-      
-      if (payload.table === 'pages') {
-        get().handlePageUpdate(payload);
-      } else if (payload.table === 'cards') {
-        get().handleCardUpdate(payload);
-      } else if (payload.table === 'activities') {
-        get().handleActivityUpdate(payload);
-      }
-    });
-
-    set({ projectChannel: channel });
-  },
-
-  unsubscribeFromProject: () => {
-    const channel = get().projectChannel;
-    if (channel) {
-      supabase.removeChannel(channel);
-      set({ projectChannel: null });
-    }
-  },
-
-  handlePageUpdate: (payload) => {
-    const { eventType, new: newRecord, old: oldRecord } = payload;
-    
-    set((state) => {
-      let updatedPages = [...state.pages];
-      
-      if (eventType === 'INSERT') {
-        updatedPages.push(newRecord);
-      } else if (eventType === 'UPDATE') {
-        updatedPages = updatedPages.map(page =>
-          page.id === newRecord.id ? newRecord : page
-        );
-      } else if (eventType === 'DELETE') {
-        updatedPages = updatedPages.filter(page => page.id !== oldRecord.id);
-      }
-      
-      return { pages: updatedPages };
-    });
-  },
-
-  handleCardUpdate: (payload) => {
-    const { eventType, new: newRecord, old: oldRecord } = payload;
-    
-    set((state) => {
-      const updatedBoards = state.boards.map(board => {
-        const updatedColumns = board.board_columns.map(column => {
-          let updatedCards = [...column.cards];
+    const pagesSubscription = supabase
+      .channel(`pages-${projectId}`)
+      .on('postgres_changes', 
+        { event: '*', schema: 'public', table: 'pages', filter: `project_id=eq.${projectId}` },
+        (payload) => {
+          const { pages } = get();
           
-          if (eventType === 'INSERT' && newRecord.column_id === column.id) {
-            updatedCards.push(newRecord);
-          } else if (eventType === 'UPDATE') {
-            updatedCards = updatedCards.map(card =>
-              card.id === newRecord.id ? newRecord : card
-            );
-          } else if (eventType === 'DELETE') {
-            updatedCards = updatedCards.filter(card => card.id !== oldRecord.id);
+          if (payload.eventType === 'INSERT') {
+            set({ pages: [...pages, payload.new] });
+          } else if (payload.eventType === 'UPDATE') {
+            set({ pages: pages.map(p => p.id === payload.new.id ? payload.new : p) });
+          } else if (payload.eventType === 'DELETE') {
+            set({ pages: pages.filter(p => p.id !== payload.old.id) });
           }
-          
-          return { ...column, cards: updatedCards };
-        });
-        
-        return { ...board, board_columns: updatedColumns };
-      });
-      
-      return { boards: updatedBoards };
-    });
+        }
+      )
+      .subscribe();
+
+    subscriptions.push(pagesSubscription);
+
+    const activitiesSubscription = supabase
+      .channel(`activities-${projectId}`)
+      .on('postgres_changes',
+        { event: 'INSERT', schema: 'public', table: 'activities', filter: `project_id=eq.${projectId}` },
+        async (payload) => {
+          const { data } = await supabase
+            .from('activities')
+            .select(`
+              *,
+              user:profiles(full_name, avatar_url),
+              page:pages(title)
+            `)
+            .eq('id', payload.new.id)
+            .single();
+
+          if (data) {
+            const { activities } = get();
+            set({ activities: [data, ...activities].slice(0, 20) });
+          }
+        }
+      )
+      .subscribe();
+
+    subscriptions.push(activitiesSubscription);
+
+    set({ subscriptions });
   },
 
-  handleActivityUpdate: (payload) => {
-    const { eventType, new: newRecord } = payload;
-    
-    if (eventType === 'INSERT') {
-      set((state) => ({
-        activities: [newRecord, ...state.activities].slice(0, 50)
-      }));
-    }
+  clearSubscriptions: () => {
+    const { subscriptions } = get();
+    subscriptions.forEach(sub => {
+      supabase.removeChannel(sub);
+    });
+    set({ subscriptions: [] });
+  },
+
+  clearCurrentProject: () => {
+    get().clearSubscriptions();
+    set({ 
+      currentProject: null, 
+      pages: [], 
+      activities: [],
+      loading: false
+    });
   },
 
   createPage: async (pageData) => {
@@ -184,13 +137,18 @@ export const useProjectStore = create((set, get) => ({
         .insert(pageData)
         .select()
         .single();
-      
+
       if (error) throw error;
-      
-      set((state) => ({
-        pages: [...state.pages, data]
-      }));
-      
+
+      // Activity is auto-logged by trigger, but we can add custom metadata
+      await supabase.from('activities').insert({
+        project_id: pageData.project_id,
+        user_id: pageData.created_by,
+        activity_type: 'page_created',
+        page_id: data.id,
+        metadata: { page_title: data.title }
+      });
+
       return data;
     } catch (error) {
       console.error('Error creating page:', error);
@@ -206,13 +164,8 @@ export const useProjectStore = create((set, get) => ({
         .eq('id', pageId)
         .select()
         .single();
-      
+
       if (error) throw error;
-      
-      set((state) => ({
-        pages: state.pages.map(page => page.id === pageId ? data : page)
-      }));
-      
       return data;
     } catch (error) {
       console.error('Error updating page:', error);
@@ -222,83 +175,63 @@ export const useProjectStore = create((set, get) => ({
 
   deletePage: async (pageId) => {
     try {
+      // FIXED: The database has ON DELETE CASCADE for activities table,
+      // so we can delete the page directly and activities will be auto-deleted
       const { error } = await supabase
         .from('pages')
         .delete()
         .eq('id', pageId);
-      
-      if (error) throw error;
-      
-      set((state) => ({
-        pages: state.pages.filter(page => page.id !== pageId)
-      }));
+
+      if (error) {
+        console.error('Delete error:', error);
+        throw error;
+      }
+
+      // Update local state
+      const { pages } = get();
+      set({ pages: pages.filter(p => p.id !== pageId) });
     } catch (error) {
       console.error('Error deleting page:', error);
       throw error;
     }
   },
 
-  createCard: async (cardData) => {
+  duplicatePage: async (pageId) => {
     try {
-      const { data, error } = await supabase
-        .from('cards')
-        .insert(cardData)
-        .select()
-        .single();
+      const { pages, currentProject } = get();
+      const originalPage = pages.find(p => p.id === pageId);
       
-      if (error) throw error;
-      return data;
-    } catch (error) {
-      console.error('Error creating card:', error);
-      throw error;
-    }
-  },
+      if (!originalPage) throw new Error('Page not found');
 
-  updateCard: async (cardId, updates) => {
-    try {
       const { data, error } = await supabase
-        .from('cards')
-        .update(updates)
-        .eq('id', cardId)
-        .select()
-        .single();
-      
-      if (error) throw error;
-      return data;
-    } catch (error) {
-      console.error('Error updating card:', error);
-      throw error;
-    }
-  },
-
-  moveCard: async (cardId, newColumnId, newPosition) => {
-    try {
-      const { data, error } = await supabase
-        .from('cards')
-        .update({
-          column_id: newColumnId,
-          position: newPosition
+        .from('pages')
+        .insert({
+          project_id: originalPage.project_id,
+          title: `${originalPage.title} (Copy)`,
+          content: originalPage.content,
+          created_by: originalPage.created_by,
+          position: pages.length
         })
-        .eq('id', cardId)
         .select()
         .single();
-      
+
       if (error) throw error;
+
+      await supabase.from('activities').insert({
+        project_id: currentProject.id,
+        user_id: originalPage.created_by,
+        activity_type: 'page_created',
+        page_id: data.id,
+        metadata: { 
+          action: 'page_duplicated',
+          original_title: originalPage.title 
+        }
+      });
+
       return data;
     } catch (error) {
-      console.error('Error moving card:', error);
+      console.error('Error duplicating page:', error);
       throw error;
     }
-  },
-
-  clearCurrentProject: () => {
-    get().unsubscribeFromProject();
-    set({
-      currentProject: null,
-      pages: [],
-      boards: [],
-      activities: [],
-      isSettingProject: false
-    });
   }
 }));

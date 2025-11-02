@@ -2,6 +2,11 @@ import React, { useEffect, useState, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useAuthStore } from '../auth/auth';
 import { useProjectStore } from '../stores/projectstore';
+import { supabase } from '../config/supabaseClient';
+import { hasPermission } from '../utils/permissions';
+import { useToast } from '../components/toast';
+import ShareProjectModal from '../components/ShareProjectModal';
+import ProjectSettingsModal from '../components/ProjectSettingsModal';
 import { 
   FileText, 
   Plus, 
@@ -20,13 +25,16 @@ import {
   Clock,
   User,
   Home,
-  ArrowLeft
+  ArrowLeft,
+  UserPlus,
+  Shield
 } from 'lucide-react';
 
 export default function ProjectView() {
   const { projectId } = useParams();
   const navigate = useNavigate();
   const { profile } = useAuthStore();
+  const toast = useToast();
   const { 
     currentProject, 
     pages, 
@@ -36,22 +44,52 @@ export default function ProjectView() {
     clearCurrentProject,
     createPage,
     updatePage,
-    deletePage
+    deletePage,
+    duplicatePage
   } = useProjectStore();
 
   const [showCreatePage, setShowCreatePage] = useState(false);
   const [selectedPage, setSelectedPage] = useState(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [showActivityFeed, setShowActivityFeed] = useState(true);
+  const [showShareModal, setShowShareModal] = useState(false);
+  const [showSettingsModal, setShowSettingsModal] = useState(false);
+  const [currentMemberRole, setCurrentMemberRole] = useState(null);
 
   useEffect(() => {
     if (projectId && profile?.id) {
-      setCurrentProject(projectId, profile.id);
+      setCurrentProject(projectId, profile.id).catch(err => {
+        toast.error('Failed to load project');
+        console.error('Project load error:', err);
+      });
     }
 
     return () => {
       clearCurrentProject();
     };
+  }, [projectId, profile?.id]);
+
+  useEffect(() => {
+    const fetchUserRole = async () => {
+      if (!projectId || !profile?.id) return;
+
+      try {
+        const { data, error } = await supabase
+          .from('project_members')
+          .select('role')
+          .eq('project_id', projectId)
+          .eq('user_id', profile.id)
+          .single();
+
+        if (error) throw error;
+        setCurrentMemberRole(data?.role || 'viewer');
+      } catch (error) {
+        console.error('Error fetching user role:', error);
+        setCurrentMemberRole('viewer');
+      }
+    };
+
+    fetchUserRole();
   }, [projectId, profile?.id]);
 
   const handleCreatePage = async (pageData) => {
@@ -64,9 +102,32 @@ export default function ProjectView() {
         position: pages.length
       });
       setShowCreatePage(false);
+      toast.success('Page created successfully!');
       navigate(`/project/${projectId}/page/${newPage.id}`);
     } catch (error) {
+      toast.error('Failed to create page');
       console.error('Error creating page:', error);
+    }
+  };
+
+  const handleDuplicatePage = async (pageId) => {
+    try {
+      const duplicatedPage = await duplicatePage(pageId);
+      toast.success('Page duplicated successfully!');
+      navigate(`/project/${projectId}/page/${duplicatedPage.id}`);
+    } catch (error) {
+      toast.error('Failed to duplicate page');
+      console.error('Error duplicating page:', error);
+    }
+  };
+
+  const handleDeletePage = async (pageId, pageTitle) => {
+    try {
+      await deletePage(pageId);
+      toast.success(`"${pageTitle}" deleted successfully`);
+    } catch (error) {
+      toast.error('Failed to delete page. Please try again.');
+      console.error('Error deleting page:', error);
     }
   };
 
@@ -103,7 +164,13 @@ export default function ProjectView() {
 
   return (
     <div className="h-screen flex flex-col bg-gray-50">
-      <ProjectHeader project={currentProject} navigate={navigate} />
+      <ProjectHeader 
+        project={currentProject} 
+        navigate={navigate}
+        currentUserRole={currentMemberRole}
+        onOpenShare={() => setShowShareModal(true)}
+        onOpenSettings={() => setShowSettingsModal(true)}
+      />
       
       <div className="flex-1 flex overflow-hidden">
         <Sidebar
@@ -115,8 +182,10 @@ export default function ProjectView() {
           setSelectedPage={setSelectedPage}
           projectId={projectId}
           navigate={navigate}
-          onDeletePage={deletePage}
+          onDeletePage={handleDeletePage}
           onUpdatePage={updatePage}
+          onDuplicatePage={handleDuplicatePage}
+          currentUserRole={currentMemberRole}
         />
 
         <MainContent
@@ -125,6 +194,7 @@ export default function ProjectView() {
           projectId={projectId}
           navigate={navigate}
           onCreatePage={() => setShowCreatePage(true)}
+          currentUserRole={currentMemberRole}
         />
 
         <ActivityFeed
@@ -140,11 +210,30 @@ export default function ProjectView() {
           onCreate={handleCreatePage}
         />
       )}
+
+      {showShareModal && (
+        <ShareProjectModal
+          project={currentProject}
+          currentUserRole={currentMemberRole}
+          currentUserId={profile.id}
+          onClose={() => setShowShareModal(false)}
+          onSuccess={() => {}}
+        />
+      )}
+
+      {showSettingsModal && (
+        <ProjectSettingsModal
+          project={currentProject}
+          currentUserRole={currentMemberRole}
+          onClose={() => setShowSettingsModal(false)}
+          onUpdate={(updatedProject) => {}}
+        />
+      )}
     </div>
   );
 }
 
-function ProjectHeader({ project, navigate }) {
+function ProjectHeader({ project, navigate, currentUserRole, onOpenShare, onOpenSettings }) {
   return (
     <header className="bg-white border-b border-gray-200 px-6 py-4">
       <div className="flex items-center justify-between">
@@ -171,14 +260,24 @@ function ProjectHeader({ project, navigate }) {
         </div>
 
         <div className="flex items-center gap-2">
-          <button className="flex items-center gap-2 px-4 py-2 text-gray-700 hover:bg-gray-100 rounded-lg transition">
-            <Users className="w-4 h-4" />
-            <span className="text-sm">Team</span>
-          </button>
-          <button className="flex items-center gap-2 px-4 py-2 text-gray-700 hover:bg-gray-100 rounded-lg transition">
-            <Settings className="w-4 h-4" />
-            <span className="text-sm">Settings</span>
-          </button>
+          {hasPermission(currentUserRole, 'canManageMembers') && (
+            <button 
+              onClick={onOpenShare}
+              className="flex items-center gap-2 px-4 py-2 text-gray-700 hover:bg-gray-100 rounded-lg transition"
+            >
+              <Users className="w-4 h-4" />
+              <span className="text-sm">Share</span>
+            </button>
+          )}
+          {hasPermission(currentUserRole, 'canManageSettings') && (
+            <button 
+              onClick={onOpenSettings}
+              className="flex items-center gap-2 px-4 py-2 text-gray-700 hover:bg-gray-100 rounded-lg transition"
+            >
+              <Settings className="w-4 h-4" />
+              <span className="text-sm">Settings</span>
+            </button>
+          )}
         </div>
       </div>
     </header>
@@ -195,7 +294,9 @@ function Sidebar({
   projectId,
   navigate,
   onDeletePage,
-  onUpdatePage
+  onUpdatePage,
+  onDuplicatePage,
+  currentUserRole
 }) {
   const [expandedFolders, setExpandedFolders] = useState(new Set());
 
@@ -227,13 +328,15 @@ function Sidebar({
           />
         </div>
 
-        <button
-          onClick={onCreatePage}
-          className="w-full flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition"
-        >
-          <Plus className="w-4 h-4" />
-          <span className="text-sm font-medium">New Page</span>
-        </button>
+        {hasPermission(currentUserRole, 'canCreatePages') && (
+          <button
+            onClick={onCreatePage}
+            className="w-full flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition"
+          >
+            <Plus className="w-4 h-4" />
+            <span className="text-sm font-medium">New Page</span>
+          </button>
+        )}
       </div>
 
       <nav className="flex-1 overflow-y-auto p-4">
@@ -273,6 +376,8 @@ function Sidebar({
                 navigate={navigate}
                 onDelete={onDeletePage}
                 onUpdate={onUpdatePage}
+                onDuplicate={onDuplicatePage}
+                currentUserRole={currentUserRole}
               />
             ))}
           </div>
@@ -293,9 +398,12 @@ function PageTreeItem({
   navigate,
   onDelete,
   onUpdate,
+  onDuplicate,
+  currentUserRole,
   level = 0
 }) {
   const [showMenu, setShowMenu] = useState(false);
+  const [showConfirmDialog, setShowConfirmDialog] = useState(false);
   const menuRef = useRef(null);
 
   const children = allPages.filter(p => p.parent_id === page.id);
@@ -311,117 +419,159 @@ function PageTreeItem({
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
 
+  const handleDeleteClick = () => {
+    setShowMenu(false);
+    setShowConfirmDialog(true);
+  };
+
+  const confirmDelete = () => {
+    onDelete(page.id, page.title);
+    setShowConfirmDialog(false);
+  };
+
   return (
-    <div>
-      <div
-        className={`group flex items-center gap-2 px-3 py-2 rounded-lg cursor-pointer transition ${
-          selected ? 'bg-blue-50 text-blue-700' : 'text-gray-700 hover:bg-gray-100'
-        }`}
-        style={{ paddingLeft: `${12 + level * 16}px` }}
-      >
-        {hasChildren && (
-          <button
-            onClick={(e) => {
-              e.stopPropagation();
-              onToggle(page.id);
-            }}
-            className="p-0.5 hover:bg-gray-200 rounded"
-          >
-            {expanded ? (
-              <ChevronDown className="w-3 h-3" />
-            ) : (
-              <ChevronRight className="w-3 h-3" />
-            )}
-          </button>
-        )}
-        {!hasChildren && <div className="w-4" />}
-
-        <FileText className="w-4 h-4 flex-shrink-0" />
-        
-        <span
-          onClick={() => {
-            onSelect(page);
-            navigate(`/project/${projectId}/page/${page.id}`);
-          }}
-          className="flex-1 text-sm truncate"
+    <>
+      <div>
+        <div
+          className={`group flex items-center gap-2 px-3 py-2 rounded-lg cursor-pointer transition ${
+            selected ? 'bg-blue-50 text-blue-700' : 'text-gray-700 hover:bg-gray-100'
+          }`}
+          style={{ paddingLeft: `${12 + level * 16}px` }}
         >
-          {page.title}
-        </span>
+          {hasChildren && (
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                onToggle(page.id);
+              }}
+              className="p-0.5 hover:bg-gray-200 rounded"
+            >
+              {expanded ? (
+                <ChevronDown className="w-3 h-3" />
+              ) : (
+                <ChevronRight className="w-3 h-3" />
+              )}
+            </button>
+          )}
+          {!hasChildren && <div className="w-4" />}
 
-        <div className="relative" ref={menuRef}>
-          <button
-            onClick={(e) => {
-              e.stopPropagation();
-              setShowMenu(!showMenu);
+          <FileText className="w-4 h-4 flex-shrink-0" />
+          
+          <span
+            onClick={() => {
+              onSelect(page);
+              navigate(`/project/${projectId}/page/${page.id}`);
             }}
-            className="p-1 opacity-0 group-hover:opacity-100 hover:bg-gray-200 rounded transition"
+            className="flex-1 text-sm truncate"
           >
-            <MoreVertical className="w-3 h-3" />
-          </button>
+            {page.title}
+          </span>
 
-          {showMenu && (
-            <div className="absolute right-0 mt-1 w-48 bg-white rounded-lg shadow-lg border border-gray-200 py-1 z-10">
+          <div className="relative" ref={menuRef}>
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                setShowMenu(!showMenu);
+              }}
+              className="p-1 opacity-0 group-hover:opacity-100 hover:bg-gray-200 rounded transition"
+            >
+              <MoreVertical className="w-3 h-3" />
+            </button>
+
+            {showMenu && (
+              <div className="absolute right-0 mt-1 w-48 bg-white rounded-lg shadow-lg border border-gray-200 py-1 z-10">
+                <button
+                  onClick={() => {
+                    navigate(`/project/${projectId}/page/${page.id}`);
+                    setShowMenu(false);
+                  }}
+                  className="w-full px-4 py-2 text-left text-sm text-gray-700 hover:bg-gray-50 flex items-center gap-2"
+                >
+                  <Edit className="w-4 h-4" />
+                  Edit
+                </button>
+                
+                {hasPermission(currentUserRole, 'canCreatePages') && (
+                  <button
+                    onClick={async () => {
+                      setShowMenu(false);
+                      await onDuplicate(page.id);
+                    }}
+                    className="w-full px-4 py-2 text-left text-sm text-gray-700 hover:bg-gray-50 flex items-center gap-2"
+                  >
+                    <Copy className="w-4 h-4" />
+                    Duplicate
+                  </button>
+                )}
+
+                {hasPermission(currentUserRole, 'canDeletePages') && (
+                  <button
+                    onClick={handleDeleteClick}
+                    className="w-full px-4 py-2 text-left text-sm text-red-600 hover:bg-red-50 flex items-center gap-2"
+                  >
+                    <Trash2 className="w-4 h-4" />
+                    Delete
+                  </button>
+                )}
+              </div>
+            )}
+          </div>
+        </div>
+
+        {expanded && hasChildren && (
+          <div>
+            {children.map(child => (
+              <PageTreeItem
+                key={child.id}
+                page={child}
+                allPages={allPages}
+                expanded={expanded}
+                onToggle={onToggle}
+                selected={selected}
+                onSelect={onSelect}
+                projectId={projectId}
+                navigate={navigate}
+                onDelete={onDelete}
+                onUpdate={onUpdate}
+                onDuplicate={onDuplicate}
+                currentUserRole={currentUserRole}
+                level={level + 1}
+              />
+            ))}
+          </div>
+        )}
+      </div>
+
+      {/* Confirmation Dialog */}
+      {showConfirmDialog && (
+        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-lg shadow-xl max-w-md w-full p-6">
+            <h3 className="text-lg font-semibold text-gray-900 mb-2">Delete Page?</h3>
+            <p className="text-sm text-gray-600 mb-6">
+              Are you sure you want to delete "{page.title}"? This action cannot be undone.
+            </p>
+            <div className="flex gap-3">
               <button
-                onClick={() => {
-                  navigate(`/project/${projectId}/page/${page.id}`);
-                  setShowMenu(false);
-                }}
-                className="w-full px-4 py-2 text-left text-sm text-gray-700 hover:bg-gray-50 flex items-center gap-2"
+                onClick={() => setShowConfirmDialog(false)}
+                className="flex-1 px-4 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition"
               >
-                <Edit className="w-4 h-4" />
-                Edit
+                Cancel
               </button>
               <button
-                onClick={() => {
-                  setShowMenu(false);
-                }}
-                className="w-full px-4 py-2 text-left text-sm text-gray-700 hover:bg-gray-50 flex items-center gap-2"
+                onClick={confirmDelete}
+                className="flex-1 px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition"
               >
-                <Copy className="w-4 h-4" />
-                Duplicate
-              </button>
-              <button
-                onClick={() => {
-                  if (confirm('Delete this page?')) {
-                    onDelete(page.id);
-                  }
-                  setShowMenu(false);
-                }}
-                className="w-full px-4 py-2 text-left text-sm text-red-600 hover:bg-red-50 flex items-center gap-2"
-              >
-                <Trash2 className="w-4 h-4" />
                 Delete
               </button>
             </div>
-          )}
-        </div>
-      </div>
-
-      {expanded && hasChildren && (
-        <div>
-          {children.map(child => (
-            <PageTreeItem
-              key={child.id}
-              page={child}
-              allPages={allPages}
-              expanded={expanded}
-              onToggle={onToggle}
-              selected={selected}
-              onSelect={onSelect}
-              projectId={projectId}
-              navigate={navigate}
-              onDelete={onDelete}
-              onUpdate={onUpdate}
-              level={level + 1}
-            />
-          ))}
+          </div>
         </div>
       )}
-    </div>
+    </>
   );
 }
 
-function MainContent({ project, pages, projectId, navigate, onCreatePage }) {
+function MainContent({ project, pages, projectId, navigate, onCreatePage, currentUserRole }) {
   return (
     <main className="flex-1 overflow-y-auto p-8">
       <div className="max-w-5xl mx-auto">
@@ -444,18 +594,20 @@ function MainContent({ project, pages, projectId, navigate, onCreatePage }) {
             </p>
           </div>
 
-          <div
-            onClick={onCreatePage}
-            className="bg-white rounded-xl border-2 border-dashed border-gray-300 p-6 hover:border-blue-500 hover:bg-blue-50 transition cursor-pointer group"
-          >
-            <div className="w-12 h-12 bg-gray-100 rounded-lg flex items-center justify-center mb-4 group-hover:bg-blue-100 transition">
-              <Plus className="w-6 h-6 text-gray-600 group-hover:text-blue-600" />
+          {hasPermission(currentUserRole, 'canCreatePages') && (
+            <div
+              onClick={onCreatePage}
+              className="bg-white rounded-xl border-2 border-dashed border-gray-300 p-6 hover:border-blue-500 hover:bg-blue-50 transition cursor-pointer group"
+            >
+              <div className="w-12 h-12 bg-gray-100 rounded-lg flex items-center justify-center mb-4 group-hover:bg-blue-100 transition">
+                <Plus className="w-6 h-6 text-gray-600 group-hover:text-blue-600" />
+              </div>
+              <h3 className="text-lg font-semibold text-gray-900 mb-2">Create New Page</h3>
+              <p className="text-sm text-gray-600">
+                Start documenting with rich text editor
+              </p>
             </div>
-            <h3 className="text-lg font-semibold text-gray-900 mb-2">Create New Page</h3>
-            <p className="text-sm text-gray-600">
-              Start documenting with rich text editor
-            </p>
-          </div>
+          )}
         </div>
 
         <div className="bg-white rounded-xl border border-gray-200 p-6">
@@ -464,12 +616,14 @@ function MainContent({ project, pages, projectId, navigate, onCreatePage }) {
             <div className="text-center py-8">
               <FileText className="w-12 h-12 text-gray-400 mx-auto mb-3" />
               <p className="text-gray-600 mb-4">No pages yet</p>
-              <button
-                onClick={onCreatePage}
-                className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition"
-              >
-                Create First Page
-              </button>
+              {hasPermission(currentUserRole, 'canCreatePages') && (
+                <button
+                  onClick={onCreatePage}
+                  className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition"
+                >
+                  Create First Page
+                </button>
+              )}
             </div>
           ) : (
             <div className="space-y-2">
@@ -494,6 +648,86 @@ function MainContent({ project, pages, projectId, navigate, onCreatePage }) {
         </div>
       </div>
     </main>
+  );
+}
+
+function ActivityItem({ activity }) {
+  const getActivityMessage = () => {
+    const userName = activity.user?.full_name || 'Someone';
+    const metadata = activity.metadata || {};
+
+    switch (metadata.action) {
+      case 'member_added':
+        return {
+          icon: UserPlus,
+          color: 'text-green-600 bg-green-100',
+          message: `${userName} invited ${metadata.member_name || metadata.member_email} as ${metadata.role}`
+        };
+      
+      case 'member_removed':
+        return {
+          icon: Trash2,
+          color: 'text-red-600 bg-red-100',
+          message: `${userName} removed ${metadata.member_name} from the project`
+        };
+      
+      case 'role_changed':
+        return {
+          icon: Shield,
+          color: 'text-blue-600 bg-blue-100',
+          message: `${userName} changed a member's role to ${metadata.new_role}`
+        };
+      
+      case 'page_duplicated':
+        return {
+          icon: Copy,
+          color: 'text-purple-600 bg-purple-100',
+          message: `${userName} duplicated "${metadata.original_title}"`
+        };
+
+      default:
+        if (activity.activity_type === 'page_created') {
+          return {
+            icon: FileText,
+            color: 'text-green-600 bg-green-100',
+            message: `${userName} created page "${activity.page?.title || 'Untitled'}"`
+          };
+        } else if (activity.activity_type === 'page_updated') {
+          return {
+            icon: Edit,
+            color: 'text-blue-600 bg-blue-100',
+            message: `${userName} updated page "${activity.page?.title || 'Untitled'}"`
+          };
+        } else if (activity.activity_type === 'page_deleted') {
+          return {
+            icon: Trash2,
+            color: 'text-red-600 bg-red-100',
+            message: `${userName} deleted a page`
+          };
+        }
+        
+        return {
+          icon: Activity,
+          color: 'text-gray-600 bg-gray-100',
+          message: `${userName} performed an action`
+        };
+    }
+  };
+
+  const { icon: Icon, color, message } = getActivityMessage();
+
+  return (
+    <div className="flex gap-3">
+      <div className={`w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0 ${color}`}>
+        <Icon className="w-4 h-4" />
+      </div>
+      <div className="flex-1 min-w-0">
+        <p className="text-sm text-gray-900">{message}</p>
+        <p className="text-xs text-gray-500 mt-1">
+          {new Date(activity.created_at).toLocaleString()}
+        </p>
+      </div>
+    </div>
   );
 }
 
@@ -539,39 +773,6 @@ function ActivityFeed({ activities, show, onToggle }) {
         )}
       </div>
     </aside>
-  );
-}
-
-function ActivityItem({ activity }) {
-  const getActionColor = (action) => {
-    const colors = {
-      created: 'text-green-600 bg-green-100',
-      updated: 'text-blue-600 bg-blue-100',
-      deleted: 'text-red-600 bg-red-100',
-      moved: 'text-purple-600 bg-purple-100'
-    };
-    return colors[action] || 'text-gray-600 bg-gray-100';
-  };
-
-  return (
-    <div className="flex gap-3">
-      <div className={`w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0 ${getActionColor(activity.action)}`}>
-        <User className="w-4 h-4" />
-      </div>
-      <div className="flex-1 min-w-0">
-        <p className="text-sm text-gray-900">
-          <span className="font-medium">{activity.user?.full_name || 'Someone'}</span>
-          {' '}
-          <span className="text-gray-600">{activity.action}</span>
-          {' '}
-          {activity.page && <span className="font-medium">{activity.page.title}</span>}
-          {activity.card && <span className="font-medium">{activity.card.title}</span>}
-        </p>
-        <p className="text-xs text-gray-500 mt-1">
-          {new Date(activity.created_at).toLocaleString()}
-        </p>
-      </div>
-    </div>
   );
 }
 

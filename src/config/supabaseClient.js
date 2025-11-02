@@ -249,7 +249,88 @@ export const supabaseHelpers = {
       });
 
     return channel;
+  },
+
+  //  deleteProject: async (projectId) => {
+  //   const { error } = await supabase
+  //     .from('projects')
+  //     .delete()
+  //     .eq('id', projectId);
+
+  //   if (error) throw error;
+  //   return true;
+  // },
+
+  updateProfile: async (userId, updates) => {
+    const { data, error } = await supabase
+      .from('profiles')
+      .update(updates)
+      .eq('id', userId)
+      .select()
+      .single();
+
+    if (error) throw error;
+    return data;
+  },
+  async deleteProject(projectId) {
+  try {
+    // First, delete all related records in the correct order
+    
+    // 1. Delete activities (has foreign key to project_id)
+    const { error: activitiesError } = await supabase
+      .from('activities')
+      .delete()
+      .eq('project_id', projectId);
+    
+    if (activitiesError) throw activitiesError;
+
+    // 2. Delete cards (if they have foreign key to pages)
+    const { data: pages } = await supabase
+      .from('pages')
+      .select('id')
+      .eq('project_id', projectId);
+    
+    if (pages && pages.length > 0) {
+      const pageIds = pages.map(p => p.id);
+      
+      const { error: cardsError } = await supabase
+        .from('cards')
+        .delete()
+        .in('linked_page_id', pageIds);
+      
+      if (cardsError) throw cardsError;
+    }
+
+    // 3. Delete pages
+    const { error: pagesError } = await supabase
+      .from('pages')
+      .delete()
+      .eq('project_id', projectId);
+    
+    if (pagesError) throw pagesError;
+
+    // 4. Delete project members
+    const { error: membersError } = await supabase
+      .from('project_members')
+      .delete()
+      .eq('project_id', projectId);
+    
+    if (membersError) throw membersError;
+
+    // 5. Finally, delete the project itself
+    const { error: projectError } = await supabase
+      .from('projects')
+      .delete()
+      .eq('id', projectId);
+    
+    if (projectError) throw projectError;
+
+    return { success: true };
+  } catch (error) {
+    console.error('Error in deleteProject:', error);
+    throw new Error(error.message || 'Failed to delete project');
   }
+}
 };
 
 export default supabase;

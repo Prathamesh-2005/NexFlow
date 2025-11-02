@@ -8,6 +8,7 @@ export const useAuthStore = create((set, get) => ({
   error: null,
   initialized: false,
 
+  // ✅ Ensures profile exists or creates it if missing
   ensureProfileExists: async (user) => {
     try {
       if (!user) return null;
@@ -20,10 +21,11 @@ export const useAuthStore = create((set, get) => ({
 
       if (selectError) console.error('Profile fetch error:', selectError);
 
+      // Create if not exists
       if (!profile) {
         const { data: newProfile, error: insertError } = await supabase
           .from('profiles')
-          .insert([
+          .upsert([
             {
               id: user.id,
               email: user.email,
@@ -46,31 +48,39 @@ export const useAuthStore = create((set, get) => ({
     }
   },
 
+  // ✅ Initialize auth only once per app load
   initialize: async () => {
     const state = get();
     if (state.initialized) {
-      console.log('Auth already initialized');
+      console.log('🔁 Auth already initialized — skipping re-run');
       return;
     }
 
     try {
+      console.log('🚀 Initializing Supabase auth...');
       const { data: { session }, error: sessionError } = await supabase.auth.getSession();
       if (sessionError) console.error('Session error:', sessionError);
 
       const user = session?.user || null;
-      if (user) {
-        const profile = await get().ensureProfileExists(user);
-        set({ user, profile, loading: false, initialized: true });
-      } else {
-        set({ user: null, profile: null, loading: false, initialized: true });
-      }
+      const profile = user ? await get().ensureProfileExists(user) : null;
 
+      set({ user, profile, loading: false, initialized: true });
+
+      // ✅ Listen for auth state changes (only once)
       supabase.auth.onAuthStateChange(async (event, session) => {
         console.log('Auth state changed:', event);
+
+        if (event === 'SIGNED_OUT') {
+          set({ user: null, profile: null, loading: false });
+          return;
+        }
+
         const newUser = session?.user || null;
         const profile = newUser ? await get().ensureProfileExists(newUser) : null;
+
         set({ user: newUser, profile, loading: false });
       });
+
     } catch (error) {
       console.error('Auth initialization error:', error);
       set({ error: error.message, loading: false, initialized: true });
@@ -81,24 +91,32 @@ export const useAuthStore = create((set, get) => ({
     try {
       set({ loading: true, error: null });
 
-      const { data, error } = await supabase.auth.signUp({
-        email,
-        password,
-        options: {
-          data: { full_name: fullName },
-        },
-      });
+const { data, error } = await supabase.auth.signUp({
+  email,
+  password,
+  options: {
+    emailRedirectTo: `${window.location.origin}/dashboard`, 
+    data: { full_name: fullName },
+    // Disable email confirmation flow
+    shouldCreateUser: true,
+  },
+});
+
+
       if (error) throw error;
 
       const user = data?.user;
       if (user) {
-        await supabase.from('profiles').insert([
-          {
-            id: user.id,
-            email: user.email,
-            full_name: fullName,
-          },
-        ]);
+        await supabase
+          .from('profiles')
+          .upsert([
+            {
+              id: user.id,
+              email: user.email,
+              full_name: fullName,
+              created_at: new Date().toISOString(),
+            },
+          ]);
       }
 
       set({ loading: false });
@@ -110,14 +128,12 @@ export const useAuthStore = create((set, get) => ({
     }
   },
 
+  // ✅ Sign-in and restore profile
   signIn: async (email, password) => {
     try {
       set({ loading: true, error: null });
 
-      const { data, error } = await supabase.auth.signInWithPassword({
-        email,
-        password,
-      });
+      const { data, error } = await supabase.auth.signInWithPassword({ email, password });
       if (error) throw error;
 
       const user = data?.user || data?.session?.user;
@@ -132,6 +148,7 @@ export const useAuthStore = create((set, get) => ({
     }
   },
 
+  // ✅ Sign-out cleanly
   signOut: async () => {
     try {
       await supabase.auth.signOut();
@@ -141,6 +158,7 @@ export const useAuthStore = create((set, get) => ({
     }
   },
 
+  // ✅ Reset password email
   resetPassword: async (email) => {
     try {
       set({ loading: true, error: null });
@@ -157,15 +175,13 @@ export const useAuthStore = create((set, get) => ({
     }
   },
 
+  // ✅ Update profile
   updateProfile: async (updates) => {
     try {
       const userId = get().user?.id;
       if (!userId) throw new Error('Not authenticated');
 
-      const { error } = await supabase
-        .from('profiles')
-        .update(updates)
-        .eq('id', userId);
+      const { error } = await supabase.from('profiles').update(updates).eq('id', userId);
       if (error) throw error;
 
       const profile = await supabaseHelpers.getCurrentUser();
@@ -175,5 +191,8 @@ export const useAuthStore = create((set, get) => ({
       console.error('Update profile error:', error);
       return { success: false, error: error.message };
     }
+  },
+  updateUserProfile: (updatedProfile) => {
+    set({ profile: updatedProfile });
   },
 }));

@@ -657,6 +657,7 @@ function ActivityItem({ activity }) {
     const metadata = activity.metadata || {};
 
     switch (metadata.action) {
+      // Member management activities
       case 'member_added':
         return {
           icon: UserPlus,
@@ -678,6 +679,7 @@ function ActivityItem({ activity }) {
           message: `${userName} changed a member's role to ${metadata.new_role}`
         };
       
+      // Page activities
       case 'page_duplicated':
         return {
           icon: Copy,
@@ -685,6 +687,43 @@ function ActivityItem({ activity }) {
           message: `${userName} duplicated "${metadata.original_title}"`
         };
 
+      // Kanban card activities
+      case 'card_created':
+        return {
+          icon: Plus,
+          color: 'text-green-600 bg-green-100',
+          message: `${userName} created card "${metadata.card_title}" in ${metadata.column_name}`
+        };
+
+      case 'card_updated':
+        return {
+          icon: Edit,
+          color: 'text-blue-600 bg-blue-100',
+          message: `${userName} updated card "${metadata.card_title}"`
+        };
+
+      case 'card_deleted':
+        return {
+          icon: Trash2,
+          color: 'text-red-600 bg-red-100',
+          message: `${userName} deleted card "${metadata.card_title}"`
+        };
+
+      case 'card_moved':
+        return {
+          icon: Layout,
+          color: 'text-purple-600 bg-purple-100',
+          message: `${userName} moved "${metadata.card_title}" from ${metadata.from_column} to ${metadata.to_column}`
+        };
+
+      case 'card_assigned':
+        return {
+          icon: User,
+          color: 'text-blue-600 bg-blue-100',
+          message: `${userName} assigned "${metadata.card_title}" to ${metadata.assignee_name}`
+        };
+
+      // Default page activities (fallback)
       default:
         if (activity.activity_type === 'page_created') {
           return {
@@ -703,6 +742,13 @@ function ActivityItem({ activity }) {
             icon: Trash2,
             color: 'text-red-600 bg-red-100',
             message: `${userName} deleted a page`
+          };
+        } else if (activity.activity_type === 'card_updated') {
+          // Handle card activities without specific action
+          return {
+            icon: Layout,
+            color: 'text-blue-600 bg-blue-100',
+            message: `${userName} updated a card`
           };
         }
         

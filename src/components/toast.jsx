@@ -13,6 +13,7 @@ export const useToast = () => {
 
 export const ToastProvider = ({ children }) => {
   const [toasts, setToasts] = useState([]);
+  const [confirmation, setConfirmation] = useState(null);
 
   const addToast = useCallback((message, type = 'info', duration = 3000) => {
     const id = Date.now() + Math.random();
@@ -33,17 +34,39 @@ export const ToastProvider = ({ children }) => {
     setToasts((prev) => prev.filter((toast) => toast.id !== id));
   }, []);
 
+  const confirm = useCallback((options) => {
+    return new Promise((resolve) => {
+      setConfirmation({
+        title: options.title || 'Confirm Action',
+        message: options.message || 'Are you sure you want to proceed?',
+        confirmText: options.confirmText || 'Confirm',
+        cancelText: options.cancelText || 'Cancel',
+        confirmVariant: options.confirmVariant || 'primary', 
+        onConfirm: () => {
+          setConfirmation(null);
+          resolve(true);
+        },
+        onCancel: () => {
+          setConfirmation(null);
+          resolve(false);
+        }
+      });
+    });
+  }, []);
+
   const toast = {
     success: (message, duration) => addToast(message, 'success', duration),
     error: (message, duration) => addToast(message, 'error', duration),
     info: (message, duration) => addToast(message, 'info', duration),
     warning: (message, duration) => addToast(message, 'warning', duration),
+    confirm: confirm,
   };
 
   return (
     <ToastContext.Provider value={toast}>
       {children}
       <ToastContainer toasts={toasts} removeToast={removeToast} />
+      {confirmation && <ConfirmationDialog {...confirmation} />}
     </ToastContext.Provider>
   );
 };
@@ -91,3 +114,73 @@ const ToastItem = ({ toast, onRemove }) => {
     </div>
   );
 };
+
+const ConfirmationDialog = ({ 
+  title, 
+  message, 
+  confirmText, 
+  cancelText, 
+  confirmVariant,
+  onConfirm, 
+  onCancel 
+}) => {
+  const confirmButtonClass = confirmVariant === 'danger'
+    ? 'flex-1 px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition'
+    : 'flex-1 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition';
+
+  return (
+    <div 
+      className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 p-4"
+      onClick={onCancel}
+    >
+      <div
+        className="bg-white rounded-lg shadow-xl max-w-md w-full p-6"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <h3 className="text-lg font-semibold text-gray-900 mb-2">{title}</h3>
+        <p className="text-sm text-gray-600 mb-6">{message}</p>
+        
+        <div className="flex gap-3">
+          <button
+            onClick={onCancel}
+            className="flex-1 px-4 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition"
+          >
+            {cancelText}
+          </button>
+          <button
+            onClick={onConfirm}
+            className={confirmButtonClass}
+          >
+            {confirmText}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+const styles = `
+@keyframes slide-in {
+  from {
+    transform: translateX(100%);
+    opacity: 0;
+  }
+  to {
+    transform: translateX(0);
+    opacity: 1;
+  }
+}
+
+@keyframes scale-in {
+  from {
+    transform: scale(0.95);
+    opacity: 0;
+  }
+  to {
+    transform: scale(1);
+    opacity: 1;
+  }
+}
+`;
+
+export default ToastProvider;

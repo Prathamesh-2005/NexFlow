@@ -140,7 +140,6 @@ export const useProjectStore = create((set, get) => ({
 
       if (error) throw error;
 
-      // Activity is auto-logged by trigger, but we can add custom metadata
       await supabase.from('activities').insert({
         project_id: pageData.project_id,
         user_id: pageData.created_by,
@@ -175,8 +174,6 @@ export const useProjectStore = create((set, get) => ({
 
   deletePage: async (pageId) => {
     try {
-      // FIXED: The database has ON DELETE CASCADE for activities table,
-      // so we can delete the page directly and activities will be auto-deleted
       const { error } = await supabase
         .from('pages')
         .delete()

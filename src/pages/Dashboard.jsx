@@ -18,15 +18,19 @@ import {
   MoreVertical,
   Trash2,
   ChevronDown,
-  User
+  User,
+  Settings,
+  Bell,
+  Star,
+  ArrowRight
 } from 'lucide-react';
 
 function getRoleBadgeColor(role) {
   const colors = {
-    owner: 'bg-purple-100 text-purple-700 border border-purple-200',
-    admin: 'bg-blue-100 text-blue-700 border border-blue-200',
-    editor: 'bg-green-100 text-green-700 border border-green-200',
-    viewer: 'bg-gray-100 text-gray-700 border border-gray-200'
+    owner: 'bg-violet-50 text-violet-700 border border-violet-200',
+    admin: 'bg-blue-50 text-blue-700 border border-blue-200',
+    editor: 'bg-emerald-50 text-emerald-700 border border-emerald-200',
+    viewer: 'bg-slate-50 text-slate-700 border border-slate-200'
   };
   return colors[role] || colors.viewer;
 }
@@ -97,89 +101,101 @@ export default function Dashboard() {
   });
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-blue-50 via-indigo-50 to-purple-50">
-      <nav className="bg-white/80 backdrop-blur-md border-b border-gray-200/50 sticky top-0 z-30 shadow-sm">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+    <div className="min-h-screen bg-white">
+      {/* Top Navigation */}
+      <nav className="sticky top-0 z-40 bg-white border-b border-gray-200">
+        <div className="max-w-7xl mx-auto px-6 lg:px-8">
           <div className="flex justify-between items-center h-16">
-            <div className="flex items-center gap-4">
+            {/* Logo Section */}
+            <div className="flex items-center gap-3">
               <img 
                 src="/logo.png" 
                 alt="NexFlow Logo" 
-                className="h-10 w-10 rounded-lg shadow-md object-cover"
+                className="h-9 w-9 rounded-lg object-cover"
               />
-              <div>
-                <h1 className="text-xl font-bold bg-gradient-to-r from-blue-600 via-indigo-600 to-purple-600 bg-clip-text text-transparent">
-                  NexFlow
-                </h1>
-                <p className="text-xs text-gray-600 font-medium">Collaborative Workspace</p>
+              <div className="hidden sm:block">
+                <h1 className="text-lg font-bold text-gray-900">NexFlow</h1>
+                <p className="text-xs text-gray-500">Collaborative Workspace</p>
               </div>
             </div>
 
-            <div className="flex items-center gap-3">
-              <div className="relative" ref={userMenuRef}>
+            {/* Right Actions */}
+            <div className="flex items-center gap-2">
+              {/* Notifications */}
+              <button className="p-2 hover:bg-gray-100 rounded-lg transition-colors relative">
+                <Bell className="w-5 h-5 text-gray-600" />
+                <span className="absolute top-1.5 right-1.5 w-2 h-2 bg-red-500 rounded-full"></span>
+              </button>
+
+              {/* Settings */}
+              <button className="p-2 hover:bg-gray-100 rounded-lg transition-colors">
+                <Settings className="w-5 h-5 text-gray-600" />
+              </button>
+
+              {/* User Menu */}
+              <div className="relative ml-2" ref={userMenuRef}>
                 <button
                   onClick={() => setShowUserMenu(!showUserMenu)}
-                  className="flex items-center gap-3 px-4 py-2.5 hover:bg-gray-100/80 rounded-xl transition-all duration-200 border border-transparent hover:border-gray-200"
+                  className="flex items-center gap-3 px-3 py-2 hover:bg-gray-50 rounded-lg transition-all"
                 >
-                  <div className="w-9 h-9 bg-gradient-to-br from-blue-500 via-indigo-500 to-purple-500 rounded-full flex items-center justify-center shadow-md ring-2 ring-white">
+                  <div className="w-8 h-8 bg-gray-900 rounded-full flex items-center justify-center">
                     <span className="text-white text-sm font-semibold">
                       {profile?.full_name?.charAt(0).toUpperCase() || 'U'}
                     </span>
                   </div>
-                  <div className="text-left hidden sm:block">
-                    <p className="text-sm font-semibold text-gray-900">
+                  <div className="text-left hidden md:block">
+                    <p className="text-sm font-medium text-gray-900">
                       {profile?.full_name || 'User'}
                     </p>
-                    <p className="text-xs text-gray-600 truncate max-w-[140px]">
+                    <p className="text-xs text-gray-500 truncate max-w-[120px]">
                       {profile?.email}
                     </p>
                   </div>
-                  <ChevronDown className={`w-4 h-4 text-gray-500 transition-transform duration-200 ${showUserMenu ? 'rotate-180' : ''}`} />
+                  <ChevronDown className={`w-4 h-4 text-gray-500 transition-transform hidden md:block ${showUserMenu ? 'rotate-180' : ''}`} />
                 </button>
 
+                {/* User Dropdown Menu */}
                 {showUserMenu && (
-                  <div className="absolute right-0 mt-2 w-72 bg-gradient-to-br from-white to-gray-50 rounded-2xl shadow-2xl border border-gray-200/50 overflow-hidden z-50 backdrop-blur-xl">
-                    <div className="px-5 py-4 bg-gradient-to-r from-blue-500 via-indigo-500 to-purple-500">
-                      <div className="flex items-center gap-3 mb-3">
-                        <div className="w-12 h-12 bg-white/20 backdrop-blur-sm rounded-full flex items-center justify-center ring-2 ring-white/30">
-                          <span className="text-white text-lg font-bold">
+                  <div className="absolute right-0 mt-2 w-64 bg-white rounded-xl shadow-lg border border-gray-200 overflow-hidden">
+                    {/* User Info Header */}
+                    <div className="px-4 py-3 border-b border-gray-100 bg-gray-50">
+                      <div className="flex items-center gap-3">
+                        <div className="w-10 h-10 bg-gray-900 rounded-full flex items-center justify-center">
+                          <span className="text-white font-bold">
                             {profile?.full_name?.charAt(0).toUpperCase() || 'U'}
                           </span>
                         </div>
                         <div className="flex-1 min-w-0">
-                          <p className="text-sm font-bold text-white truncate">
+                          <p className="text-sm font-semibold text-gray-900 truncate">
                             {profile?.full_name || 'User'}
                           </p>
-                          <p className="text-xs text-white/80 truncate">
+                          <p className="text-xs text-gray-500 truncate">
                             {profile?.email}
                           </p>
                         </div>
                       </div>
                     </div>
                     
-                    <div className="p-2">
+                    {/* Menu Items */}
+                    <div className="py-2">
                       <button 
                         onClick={() => {
                           setShowUserMenu(false);
                           setShowProfileSettings(true);
                         }}
-                        className="w-full px-4 py-3 text-left text-sm font-medium text-gray-700 hover:bg-gradient-to-r hover:from-blue-50 hover:to-indigo-50 rounded-xl flex items-center gap-3 transition-all duration-200 group"
+                        className="w-full px-4 py-2.5 text-left text-sm text-gray-700 hover:bg-gray-50 flex items-center gap-3 transition-colors"
                       >
-                        <div className="w-8 h-8 bg-blue-100 rounded-lg flex items-center justify-center group-hover:bg-blue-200 transition-colors">
-                          <User className="w-4 h-4 text-blue-600" />
-                        </div>
+                        <User className="w-4 h-4 text-gray-500" />
                         <span>Profile Settings</span>
                       </button>
 
-                      <div className="my-2 border-t border-gray-200"></div>
+                      <div className="my-1 border-t border-gray-100"></div>
                       
                       <button
                         onClick={signOut}
-                        className="w-full px-4 py-3 text-left text-sm font-medium text-red-600 hover:bg-red-50 rounded-xl flex items-center gap-3 transition-all duration-200 group"
+                        className="w-full px-4 py-2.5 text-left text-sm text-red-600 hover:bg-red-50 flex items-center gap-3 transition-colors"
                       >
-                        <div className="w-8 h-8 bg-red-100 rounded-lg flex items-center justify-center group-hover:bg-red-200 transition-colors">
-                          <LogOut className="w-4 h-4 text-red-600" />
-                        </div>
+                        <LogOut className="w-4 h-4" />
                         <span>Sign Out</span>
                       </button>
                     </div>
@@ -191,36 +207,48 @@ export default function Dashboard() {
         </div>
       </nav>
 
-      <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+      {/* Main Content */}
+      <main className="max-w-7xl mx-auto px-6 lg:px-8 py-8">
+        {/* Header Section */}
         <div className="mb-8">
-          <h2 className="text-4xl font-bold bg-gradient-to-r from-gray-900 via-blue-900 to-indigo-900 bg-clip-text text-transparent mb-2">
-            My Projects
-          </h2>
-          <p className="text-gray-700 text-lg">
-            Manage and organize all your collaborative workspaces
-          </p>
-        </div>
-
-        <div className="bg-white/70 backdrop-blur-md rounded-2xl shadow-lg border border-gray-200/50 p-5 mb-6">
-          <div className="flex flex-col sm:flex-row gap-4 items-center justify-between">
-            <div className="relative flex-1 w-full sm:w-auto">
-              <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400" />
-              <input
-                type="text"
-                placeholder="Search projects..."
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                className="w-full pl-12 pr-4 py-3 border border-gray-300 bg-white rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none transition-all shadow-sm"
-              />
+          <div className="flex items-center justify-between mb-6">
+            <div>
+              <h1 className="text-3xl font-bold text-gray-900 mb-1">My Projects</h1>
+              <p className="text-gray-600">
+                Manage and organize your collaborative workspaces
+              </p>
             </div>
+            <button
+              onClick={() => setShowCreateModal(true)}
+              className="flex items-center gap-2 px-4 py-2.5 bg-gray-900 text-white rounded-lg hover:bg-gray-800 transition-all shadow-sm hover:shadow-md"
+            >
+              <Plus className="w-4 h-4" />
+              <span className="hidden sm:inline font-medium">New Project</span>
+            </button>
+          </div>
 
-            <div className="flex items-center gap-3 w-full sm:w-auto">
-              <div className="relative flex-1 sm:flex-none">
+          {/* Search and Filters Bar */}
+          <div className="bg-gray-50 rounded-xl p-4 border border-gray-200">
+            <div className="flex flex-col sm:flex-row gap-3">
+              {/* Search */}
+              <div className="relative flex-1">
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+                <input
+                  type="text"
+                  placeholder="Search projects..."
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  className="w-full pl-10 pr-4 py-2 border border-gray-300 bg-white rounded-lg focus:ring-1 focus:ring-gray-900 focus:border-gray-900 outline-none transition-all text-sm"
+                />
+              </div>
+
+              {/* Filter Dropdown */}
+              <div className="relative">
                 <Filter className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400 pointer-events-none" />
                 <select
                   value={filterRole}
                   onChange={(e) => setFilterRole(e.target.value)}
-                  className="w-full sm:w-auto pl-10 pr-10 py-3 border border-gray-300 bg-white rounded-xl focus:ring-2 focus:ring-blue-500 outline-none appearance-none cursor-pointer transition-all shadow-sm font-medium text-gray-700"
+                  className="pl-9 pr-8 py-2 border border-gray-300 bg-white rounded-lg focus:ring-1 focus:ring-gray-900 outline-none appearance-none cursor-pointer transition-all text-sm font-medium text-gray-700"
                 >
                   <option value="all">All Roles</option>
                   <option value="owner">Owner</option>
@@ -230,62 +258,56 @@ export default function Dashboard() {
                 </select>
               </div>
 
-              <div className="flex bg-gray-100 rounded-xl p-1.5 gap-1 shadow-sm">
+              {/* View Mode Toggle */}
+              <div className="flex bg-white rounded-lg border border-gray-300 p-1">
                 <button
                   onClick={() => setViewMode('grid')}
-                  className={`p-2.5 rounded-lg transition-all duration-200 ${viewMode === 'grid' ? 'bg-white shadow-md' : 'hover:bg-gray-200'}`}
+                  className={`p-2 rounded transition-all ${viewMode === 'grid' ? 'bg-gray-900 text-white' : 'text-gray-600 hover:bg-gray-100'}`}
                 >
-                  <Grid className="w-4 h-4 text-gray-700" />
+                  <Grid className="w-4 h-4" />
                 </button>
                 <button
                   onClick={() => setViewMode('list')}
-                  className={`p-2.5 rounded-lg transition-all duration-200 ${viewMode === 'list' ? 'bg-white shadow-md' : 'hover:bg-gray-200'}`}
+                  className={`p-2 rounded transition-all ${viewMode === 'list' ? 'bg-gray-900 text-white' : 'text-gray-600 hover:bg-gray-100'}`}
                 >
-                  <List className="w-4 h-4 text-gray-700" />
+                  <List className="w-4 h-4" />
                 </button>
               </div>
-
-              <button
-                onClick={() => setShowCreateModal(true)}
-                className="flex items-center gap-2 px-5 py-3 bg-gradient-to-r from-blue-600 via-indigo-600 to-purple-600 text-white rounded-xl hover:from-blue-700 hover:via-indigo-700 hover:to-purple-700 transition-all shadow-lg hover:shadow-xl hover:scale-105 duration-200"
-              >
-                <Plus className="w-5 h-5" />
-                <span className="hidden sm:inline font-semibold">New Project</span>
-              </button>
             </div>
           </div>
         </div>
 
+        {/* Projects Grid/List */}
         {loading ? (
           <div className="flex items-center justify-center py-20">
             <div className="text-center">
-              <div className="w-16 h-16 border-4 border-blue-600 border-t-transparent rounded-full animate-spin mx-auto mb-4"></div>
-              <p className="text-gray-700 font-semibold">Loading projects...</p>
+              <div className="w-12 h-12 border-4 border-gray-900 border-t-transparent rounded-full animate-spin mx-auto mb-4"></div>
+              <p className="text-gray-600 font-medium">Loading projects...</p>
             </div>
           </div>
         ) : filteredProjects.length === 0 ? (
-          <div className="bg-white/70 backdrop-blur-md rounded-2xl border-2 border-dashed border-gray-300 p-12 text-center shadow-lg">
-            <div className="w-20 h-20 bg-gradient-to-br from-blue-100 to-indigo-100 rounded-full flex items-center justify-center mx-auto mb-4 shadow-md">
-              <FolderOpen className="w-10 h-10 text-blue-600" />
+          <div className="bg-gray-50 rounded-xl border border-gray-200 p-12 text-center">
+            <div className="w-16 h-16 bg-gray-100 rounded-full flex items-center justify-center mx-auto mb-4">
+              <FolderOpen className="w-8 h-8 text-gray-400" />
             </div>
-            <h3 className="text-2xl font-bold text-gray-900 mb-2">
+            <h3 className="text-xl font-semibold text-gray-900 mb-2">
               No projects found
             </h3>
-            <p className="text-gray-600 mb-6 text-lg">
+            <p className="text-gray-600 mb-6">
               {searchQuery ? 'Try adjusting your search or filters' : 'Create your first project to get started'}
             </p>
             {!searchQuery && (
               <button
                 onClick={() => setShowCreateModal(true)}
-                className="inline-flex items-center gap-2 px-6 py-3 bg-gradient-to-r from-blue-600 via-indigo-600 to-purple-600 text-white rounded-xl hover:from-blue-700 hover:via-indigo-700 hover:to-purple-700 transition-all shadow-lg hover:shadow-xl font-semibold"
+                className="inline-flex items-center gap-2 px-5 py-2.5 bg-gray-900 text-white rounded-lg hover:bg-gray-800 transition-all font-medium"
               >
-                <Plus className="w-5 h-5" />
+                <Plus className="w-4 h-4" />
                 Create Project
               </button>
             )}
           </div>
         ) : viewMode === 'grid' ? (
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
             {filteredProjects.map((project) => (
               <ProjectCard 
                 key={project.id} 
@@ -296,7 +318,7 @@ export default function Dashboard() {
             ))}
           </div>
         ) : (
-          <div className="bg-white/70 backdrop-blur-md rounded-2xl shadow-lg border border-gray-200/50 overflow-hidden">
+          <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
             {filteredProjects.map((project, index) => (
               <ProjectListItem
                 key={project.id}
@@ -310,6 +332,7 @@ export default function Dashboard() {
         )}
       </main>
 
+      {/* Modals */}
       {showCreateModal && (
         <CreateProjectModal
           onClose={() => setShowCreateModal(false)}
@@ -338,6 +361,7 @@ export default function Dashboard() {
 
 function ProjectCard({ project, navigate, onDelete }) {
   const [showMenu, setShowMenu] = useState(false);
+  const [isHovered, setIsHovered] = useState(false);
   const menuRef = useRef(null);
 
   useEffect(() => {
@@ -356,67 +380,73 @@ function ProjectCard({ project, navigate, onDelete }) {
 
   return (
     <div
+      onMouseEnter={() => setIsHovered(true)}
+      onMouseLeave={() => setIsHovered(false)}
       onClick={() => navigate(`/project/${project.id}`)}
-      className="group bg-white/80 backdrop-blur-sm rounded-2xl shadow-md border border-gray-200/50 p-6 hover:shadow-2xl hover:border-blue-300 hover:scale-105 transition-all duration-300 cursor-pointer relative overflow-hidden"
+      className="group bg-white rounded-xl border border-gray-200 p-5 hover:shadow-lg hover:border-gray-300 transition-all duration-300 cursor-pointer relative"
     >
-      <div
-        className="absolute top-0 left-0 right-0 h-2 rounded-t-2xl shadow-sm"
-        style={{ backgroundColor: project.color }}
-      ></div>
-
-      <div className="absolute top-4 right-4" ref={menuRef}>
-        <button
-          onClick={(e) => {
-            e.stopPropagation();
-            setShowMenu(!showMenu);
-          }}
-          className="p-2 opacity-0 group-hover:opacity-100 hover:bg-gray-100 rounded-lg transition-all duration-200"
-        >
-          <MoreVertical className="w-4 h-4 text-gray-600" />
-        </button>
-
-        {showMenu && canDelete && (
-          <div className="absolute right-0 mt-2 w-48 bg-white rounded-xl shadow-2xl border border-gray-200 overflow-hidden z-10">
-            <button
-              onClick={(e) => {
-                e.stopPropagation();
-                setShowMenu(false);
-                onDelete(project);
-              }}
-              className="w-full px-4 py-3 text-left text-sm font-medium text-red-600 hover:bg-red-50 flex items-center gap-3 transition-colors"
-            >
-              <Trash2 className="w-4 h-4" />
-              Delete Project
-            </button>
-          </div>
-        )}
-      </div>
-
-      <div className="flex items-start gap-4 mb-4">
+      {/* Project Icon & Menu */}
+      <div className="flex items-start justify-between mb-4">
         <div
-          className="w-14 h-14 rounded-xl flex items-center justify-center text-2xl flex-shrink-0 shadow-lg ring-2 ring-white"
-          style={{ backgroundColor: project.color + '30' }}
+          className="w-12 h-12 rounded-lg flex items-center justify-center text-2xl shadow-sm"
+          style={{ backgroundColor: project.color + '20', color: project.color }}
         >
           {project.icon || '📁'}
         </div>
-        <div className="flex-1 min-w-0">
-          <h3 className="text-lg font-bold text-gray-900 truncate mb-1">
-            {project.name}
-          </h3>
-          <p className="text-sm text-gray-600 line-clamp-2">
-            {project.description}
-          </p>
+
+        <div className="relative" ref={menuRef}>
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              setShowMenu(!showMenu);
+            }}
+            className={`p-1.5 hover:bg-gray-100 rounded-lg transition-all ${isHovered ? 'opacity-100' : 'opacity-0'}`}
+          >
+            <MoreVertical className="w-4 h-4 text-gray-600" />
+          </button>
+
+          {showMenu && canDelete && (
+            <div className="absolute right-0 mt-1 w-44 bg-white rounded-lg shadow-lg border border-gray-200 overflow-hidden z-10">
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setShowMenu(false);
+                  onDelete(project);
+                }}
+                className="w-full px-3 py-2 text-left text-sm text-red-600 hover:bg-red-50 flex items-center gap-2 transition-colors"
+              >
+                <Trash2 className="w-4 h-4" />
+                Delete Project
+              </button>
+            </div>
+          )}
         </div>
       </div>
 
-      <div className="flex items-center justify-between mt-4 pt-4 border-t border-gray-200">
-        <span className={`px-3 py-1.5 rounded-full text-xs font-semibold ${getRoleBadgeColor(project.userRole)}`}>
+      {/* Project Info */}
+      <div className="mb-4">
+        <h3 className="text-base font-semibold text-gray-900 mb-1 truncate">
+          {project.name}
+        </h3>
+        <p className="text-sm text-gray-600 line-clamp-2">
+          {project.description || 'No description'}
+        </p>
+      </div>
+
+      {/* Footer */}
+      <div className="flex items-center justify-between pt-4 border-t border-gray-100">
+        <span className={`px-2.5 py-1 rounded-md text-xs font-medium ${getRoleBadgeColor(project.userRole)}`}>
           {project.userRole}
         </span>
-        <div className="flex items-center gap-1.5 text-xs text-gray-500 font-medium">
-          <Clock className="w-3.5 h-3.5" />
+        <div className="flex items-center gap-1 text-xs text-gray-500">
+          <Clock className="w-3 h-3" />
           {new Date(project.created_at).toLocaleDateString()}
         </div>
+      </div>
+
+      {/* Hover Arrow */}
+      <div className={`absolute bottom-5 right-5 transition-all duration-300 ${isHovered ? 'opacity-100 translate-x-0' : 'opacity-0 translate-x-2'}`}>
+        <ArrowRight className="w-4 h-4 text-gray-400" />
       </div>
     </div>
   );
@@ -442,27 +472,27 @@ function ProjectListItem({ project, navigate, isLast, onDelete }) {
 
   return (
     <div
-      className={`flex items-center gap-4 p-4 hover:bg-gradient-to-r hover:from-blue-50 hover:to-indigo-50 transition-all duration-200 ${!isLast ? 'border-b border-gray-200' : ''}`}
+      className={`flex items-center gap-4 p-4 hover:bg-gray-50 transition-all ${!isLast ? 'border-b border-gray-200' : ''}`}
     >
       <div
         onClick={() => navigate(`/project/${project.id}`)}
         className="flex items-center gap-4 flex-1 min-w-0 cursor-pointer"
       >
         <div
-          className="w-12 h-12 rounded-xl flex items-center justify-center text-xl flex-shrink-0 shadow-md ring-2 ring-white"
-          style={{ backgroundColor: project.color + '30' }}
+          className="w-10 h-10 rounded-lg flex items-center justify-center text-xl shadow-sm flex-shrink-0"
+          style={{ backgroundColor: project.color + '20', color: project.color }}
         >
           {project.icon || '📁'}
         </div>
         <div className="flex-1 min-w-0">
-          <h3 className="font-bold text-gray-900 truncate">{project.name}</h3>
-          <p className="text-sm text-gray-600 truncate">{project.description}</p>
+          <h3 className="font-semibold text-gray-900 truncate text-sm">{project.name}</h3>
+          <p className="text-sm text-gray-600 truncate">{project.description || 'No description'}</p>
         </div>
-        <span className={`px-3 py-1.5 rounded-full text-xs font-semibold ${getRoleBadgeColor(project.userRole)}`}>
+        <span className={`px-2.5 py-1 rounded-md text-xs font-medium ${getRoleBadgeColor(project.userRole)} hidden sm:block`}>
           {project.userRole}
         </span>
-        <div className="flex items-center gap-1.5 text-xs text-gray-500 font-medium">
-          <Clock className="w-3.5 h-3.5" />
+        <div className="flex items-center gap-1 text-xs text-gray-500 hidden md:flex">
+          <Clock className="w-3 h-3" />
           {new Date(project.created_at).toLocaleDateString()}
         </div>
       </div>
@@ -473,20 +503,20 @@ function ProjectListItem({ project, navigate, isLast, onDelete }) {
             e.stopPropagation();
             setShowMenu(!showMenu);
           }}
-          className="p-2 hover:bg-gray-100 rounded-lg transition-colors"
+          className="p-1.5 hover:bg-gray-100 rounded-lg transition-colors"
         >
           <MoreVertical className="w-4 h-4 text-gray-600" />
         </button>
 
         {showMenu && canDelete && (
-          <div className="absolute right-0 mt-2 w-48 bg-white rounded-xl shadow-2xl border border-gray-200 overflow-hidden z-10">
+          <div className="absolute right-0 mt-1 w-44 bg-white rounded-lg shadow-lg border border-gray-200 overflow-hidden z-10">
             <button
               onClick={(e) => {
                 e.stopPropagation();
                 setShowMenu(false);
                 onDelete(project);
               }}
-              className="w-full px-4 py-3 text-left text-sm font-medium text-red-600 hover:bg-red-50 flex items-center gap-3 transition-colors"
+              className="w-full px-3 py-2 text-left text-sm text-red-600 hover:bg-red-50 flex items-center gap-2 transition-colors"
             >
               <Trash2 className="w-4 h-4" />
               Delete Project
@@ -538,17 +568,17 @@ function CreateProjectModal({ onClose, onSuccess }) {
   return (
     <div
       onClick={onClose}
-      className="fixed inset-0 bg-gray-900/60 backdrop-blur-sm flex items-center justify-center z-40 p-4"
+      className="fixed inset-0 bg-gray-900/50 backdrop-blur-sm flex items-center justify-center z-50 p-4"
     >
       <div
         onClick={(e) => e.stopPropagation()}
-        className="bg-white rounded-2xl shadow-2xl max-w-md w-full p-6"
+        className="bg-white rounded-xl shadow-xl max-w-md w-full p-6"
       >
         <h2 className="text-2xl font-bold text-gray-900 mb-6">Create New Project</h2>
 
-        <div className="space-y-5">
+        <div className="space-y-4">
           <div>
-            <label className="block text-sm font-semibold text-gray-700 mb-2">
+            <label className="block text-sm font-medium text-gray-700 mb-2">
               Project Name
             </label>
             <input
@@ -557,26 +587,26 @@ function CreateProjectModal({ onClose, onSuccess }) {
               autoFocus
               value={formData.name}
               onChange={(e) => setFormData({ ...formData, name: e.target.value })}
-              className="w-full px-4 py-3 border border-gray-300 bg-white rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none transition-all"
+              className="w-full px-4 py-2.5 border border-gray-300 bg-white rounded-lg focus:ring-1 focus:ring-gray-900 focus:border-gray-900 outline-none transition-all"
               placeholder="My Awesome Project"
             />
           </div>
 
           <div>
-            <label className="block text-sm font-semibold text-gray-700 mb-2">
+            <label className="block text-sm font-medium text-gray-700 mb-2">
               Description
             </label>
             <textarea
               value={formData.description}
               onChange={(e) => setFormData({ ...formData, description: e.target.value })}
-              className="w-full px-4 py-3 border border-gray-300 bg-white rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none resize-none transition-all"
+              className="w-full px-4 py-2.5 border border-gray-300 bg-white rounded-lg focus:ring-1 focus:ring-gray-900 focus:border-gray-900 outline-none resize-none transition-all"
               rows="3"
               placeholder="Brief description of the project..."
             />
           </div>
 
           <div>
-            <label className="block text-sm font-semibold text-gray-700 mb-2">
+            <label className="block text-sm font-medium text-gray-700 mb-2">
               Icon
             </label>
             <div className="flex gap-2 flex-wrap">
@@ -585,10 +615,10 @@ function CreateProjectModal({ onClose, onSuccess }) {
                   key={icon}
                   type="button"
                   onClick={() => setFormData({ ...formData, icon })}
-                  className={`w-12 h-12 rounded-xl text-2xl flex items-center justify-center border-2 transition-all ${
+                  className={`w-11 h-11 rounded-lg text-xl flex items-center justify-center border-2 transition-all ${
                     formData.icon === icon 
-                      ? 'border-blue-500 bg-blue-50 scale-110 shadow-md' 
-                      : 'border-gray-200 hover:border-gray-300 hover:scale-105'
+                      ? 'border-gray-900 bg-gray-50 scale-105' 
+                      : 'border-gray-200 hover:border-gray-300'
                   }`}
                 >
                   {icon}
@@ -598,7 +628,7 @@ function CreateProjectModal({ onClose, onSuccess }) {
           </div>
 
           <div>
-            <label className="block text-sm font-semibold text-gray-700 mb-2">
+            <label className="block text-sm font-medium text-gray-700 mb-2">
               Color
             </label>
             <div className="flex gap-2 flex-wrap">
@@ -607,9 +637,9 @@ function CreateProjectModal({ onClose, onSuccess }) {
                   key={color}
                   type="button"
                   onClick={() => setFormData({ ...formData, color })}
-                  className={`w-10 h-10 rounded-xl border-2 transition-all ${
+                  className={`w-9 h-9 rounded-lg border-2 transition-all ${
                     formData.color === color 
-                      ? 'border-gray-900 scale-110 shadow-lg ring-2 ring-gray-200' 
+                      ? 'border-gray-900 scale-105 ring-2 ring-gray-200' 
                       : 'border-transparent hover:scale-105'
                   }`}
                   style={{ backgroundColor: color }}
@@ -622,7 +652,7 @@ function CreateProjectModal({ onClose, onSuccess }) {
             <button
               type="button"
               onClick={onClose}
-              className="flex-1 px-4 py-3 border border-gray-300 text-gray-700 rounded-xl hover:bg-gray-50 transition-colors font-semibold"
+              className="flex-1 px-4 py-2.5 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition-colors font-medium"
             >
               Cancel
             </button>
@@ -630,7 +660,7 @@ function CreateProjectModal({ onClose, onSuccess }) {
               type="button"
               onClick={handleSubmit}
               disabled={loading}
-              className="flex-1 px-4 py-3 bg-gradient-to-r from-blue-600 via-indigo-600 to-purple-600 text-white rounded-xl hover:from-blue-700 hover:via-indigo-700 hover:to-purple-700 transition-all disabled:opacity-50 font-semibold shadow-lg"
+              className="flex-1 px-4 py-2.5 bg-gray-900 text-white rounded-lg hover:bg-gray-800 transition-all disabled:opacity-50 font-medium"
             >
               {loading ? 'Creating...' : 'Create Project'}
             </button>
@@ -645,15 +675,15 @@ function DeleteConfirmModal({ project, onClose, onConfirm, loading }) {
   return (
     <div
       onClick={onClose}
-      className="fixed inset-0 bg-gray-900/60 backdrop-blur-sm flex items-center justify-center z-40 p-4"
+      className="fixed inset-0 bg-gray-900/50 backdrop-blur-sm flex items-center justify-center z-50 p-4"
     >
       <div
         onClick={(e) => e.stopPropagation()}
-        className="bg-white rounded-2xl shadow-2xl max-w-md w-full p-6"
+        className="bg-white rounded-xl shadow-xl max-w-md w-full p-6"
       >
-        <div className="flex items-center gap-4 mb-4">
-          <div className="w-12 h-12 bg-red-100 rounded-full flex items-center justify-center">
-            <Trash2 className="w-6 h-6 text-red-600" />
+        <div className="flex items-center gap-3 mb-4">
+          <div className="w-11 h-11 bg-red-50 rounded-full flex items-center justify-center">
+            <Trash2 className="w-5 h-5 text-red-600" />
           </div>
           <div>
             <h2 className="text-xl font-bold text-gray-900">Delete Project</h2>
@@ -682,14 +712,14 @@ function DeleteConfirmModal({ project, onClose, onConfirm, loading }) {
             type="button"
             onClick={onClose}
             disabled={loading}
-            className="flex-1 px-4 py-3 border border-gray-300 text-gray-700 rounded-xl hover:bg-gray-50 transition-colors disabled:opacity-50 font-semibold"
+            className="flex-1 px-4 py-2.5 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition-colors disabled:opacity-50 font-medium"
           >
             Cancel
           </button>
           <button
             onClick={onConfirm}
             disabled={loading}
-            className="flex-1 px-4 py-3 bg-red-600 text-white rounded-xl hover:bg-red-700 transition-colors disabled:opacity-50 flex items-center justify-center gap-2 font-semibold shadow-lg"
+            className="flex-1 px-4 py-2.5 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors disabled:opacity-50 flex items-center justify-center gap-2 font-medium"
           >
             {loading ? (
               <>

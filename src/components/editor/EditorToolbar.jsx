@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useRef } from 'react';
 import {
   Bold, Italic, Underline as UnderlineIcon, Code, List, ListOrdered,
   Heading1, Heading2, Heading3, Link2, Image as ImageIcon,
@@ -6,6 +6,7 @@ import {
   AlignLeft, AlignCenter, AlignRight, AlignJustify,
   Highlighter, Strikethrough, ListChecks, Type, Code2
 } from 'lucide-react';
+import { useToast } from '../toast';
 
 const ToolbarButton = ({ onClick, active, disabled, children, title }) => (
   <button
@@ -22,8 +23,51 @@ const ToolbarButton = ({ onClick, active, disabled, children, title }) => (
 
 const Divider = () => <div className="w-px h-6 bg-gray-300 mx-1" />;
 
-export default function EditorToolbar({ editor, onImageUpload }) {
+export default function EditorToolbar({ editor }) {
+  const fileInputRef = useRef(null);
+  const toast = useToast();
+
   if (!editor) return null;
+
+  const handleImageClick = () => {
+    console.log('📸 Image button clicked');
+    fileInputRef.current?.click();
+  };
+
+  const handleImageUpload = async (e) => {
+    const file = e.target.files?.[0];
+    
+    console.log('📁 File selected:', file ? {
+      name: file.name,
+      type: file.type,
+      size: file.size
+    } : 'No file');
+    
+    if (!file) return;
+
+    try {
+      console.log('🚀 Starting image upload process');
+      
+      if (editor.isEditable) {
+     editor.view.focus();
+   }
+   const success = await editor.commands.uploadAndInsertImage(file, toast);
+      
+      console.log('📊 Upload result:', success ? 'SUCCESS' : 'FAILED');
+      
+      if (!success) {
+        console.error('❌ Image upload command returned false');
+        toast.error('Failed to insert image into editor');
+      }
+    } catch (error) {
+      console.error('❌ Error in handleImageUpload:', error);
+      toast.error(`Failed to upload image: ${error.message}`);
+    } finally {
+      // Reset input to allow uploading the same file again
+      e.target.value = '';
+      console.log('🔄 File input reset');
+    }
+  };
 
   return (
     <div className="border-b border-gray-200 bg-white px-4 py-2 flex flex-wrap items-center gap-1 sticky top-0 z-10 shadow-sm">
@@ -208,11 +252,19 @@ export default function EditorToolbar({ editor, onImageUpload }) {
         <Link2 className="w-4 h-4" />
       </ToolbarButton>
       <ToolbarButton
-        onClick={onImageUpload}
-        title="Insert Image"
+        onClick={handleImageClick}
+        title="Insert Image (Upload from device)"
       >
         <ImageIcon className="w-4 h-4" />
       </ToolbarButton>
+      {/* Hidden file input */}
+      <input
+        ref={fileInputRef}
+        type="file"
+        accept="image/*"
+        onChange={handleImageUpload}
+        className="hidden"
+      />
       <ToolbarButton
         onClick={() => editor.chain().focus().insertTable({ rows: 3, cols: 3, withHeaderRow: true }).run()}
         title="Insert Table"

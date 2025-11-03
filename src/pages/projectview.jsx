@@ -57,17 +57,22 @@ export default function ProjectView() {
   const [currentMemberRole, setCurrentMemberRole] = useState(null);
 
   useEffect(() => {
+    let isMounted = true;
+    
     if (projectId && profile?.id) {
       setCurrentProject(projectId, profile.id).catch(err => {
-        toast.error('Failed to load project');
-        console.error('Project load error:', err);
+        if (isMounted) {
+          toast.error('Failed to load project');
+          console.error('Project load error:', err);
+        }
       });
     }
 
     return () => {
+      isMounted = false;
       clearCurrentProject();
     };
-  }, [projectId, profile?.id]);
+  }, [projectId, profile?.id, setCurrentProject, clearCurrentProject]);
 
   useEffect(() => {
     const fetchUserRole = async () => {
@@ -137,10 +142,10 @@ export default function ProjectView() {
 
   if (loading) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-gray-50">
+      <div className="min-h-screen flex items-center justify-center bg-white">
         <div className="text-center">
-          <div className="w-16 h-16 border-4 border-blue-600 border-t-transparent rounded-full animate-spin mx-auto mb-4"></div>
-          <p className="text-gray-600">Loading project...</p>
+          <div className="w-12 h-12 border-4 border-gray-900 border-t-transparent rounded-full animate-spin mx-auto mb-4"></div>
+          <p className="text-gray-600 font-medium">Loading project...</p>
         </div>
       </div>
     );
@@ -148,12 +153,12 @@ export default function ProjectView() {
 
   if (!currentProject) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-gray-50">
+      <div className="min-h-screen flex items-center justify-center bg-white">
         <div className="text-center">
-          <p className="text-gray-600">Project not found</p>
+          <p className="text-gray-600 mb-4">Project not found</p>
           <button
             onClick={() => navigate('/dashboard')}
-            className="mt-4 px-4 py-2 bg-blue-600 text-white rounded-lg"
+            className="px-4 py-2 bg-gray-900 text-white rounded-lg hover:bg-gray-800 transition-colors"
           >
             Back to Dashboard
           </button>
@@ -163,7 +168,7 @@ export default function ProjectView() {
   }
 
   return (
-    <div className="h-screen flex flex-col bg-gray-50">
+    <div className="h-screen flex flex-col bg-white">
       <ProjectHeader 
         project={currentProject} 
         navigate={navigate}
@@ -240,21 +245,21 @@ function ProjectHeader({ project, navigate, currentUserRole, onOpenShare, onOpen
         <div className="flex items-center gap-4">
           <button
             onClick={() => navigate('/dashboard')}
-            className="p-2 hover:bg-gray-100 rounded-lg transition"
+            className="p-2 hover:bg-gray-100 rounded-lg transition-colors"
           >
             <ArrowLeft className="w-5 h-5 text-gray-600" />
           </button>
 
           <div className="flex items-center gap-3">
             <div
-              className="w-10 h-10 rounded-lg flex items-center justify-center text-2xl"
-              style={{ backgroundColor: project.color + '20' }}
+              className="w-10 h-10 rounded-lg flex items-center justify-center text-xl shadow-sm"
+              style={{ backgroundColor: project.color + '20', color: project.color }}
             >
               {project.icon || '📁'}
             </div>
             <div>
-              <h1 className="text-xl font-bold text-gray-900">{project.name}</h1>
-              <p className="text-sm text-gray-600">{project.description}</p>
+              <h1 className="text-lg font-bold text-gray-900">{project.name}</h1>
+              <p className="text-xs text-gray-500">{project.description}</p>
             </div>
           </div>
         </div>
@@ -263,19 +268,19 @@ function ProjectHeader({ project, navigate, currentUserRole, onOpenShare, onOpen
           {hasPermission(currentUserRole, 'canManageMembers') && (
             <button 
               onClick={onOpenShare}
-              className="flex items-center gap-2 px-4 py-2 text-gray-700 hover:bg-gray-100 rounded-lg transition"
+              className="flex items-center gap-2 px-3 py-2 text-gray-700 hover:bg-gray-100 rounded-lg transition-colors"
             >
               <Users className="w-4 h-4" />
-              <span className="text-sm">Share</span>
+              <span className="text-sm font-medium">Share</span>
             </button>
           )}
           {hasPermission(currentUserRole, 'canManageSettings') && (
             <button 
               onClick={onOpenSettings}
-              className="flex items-center gap-2 px-4 py-2 text-gray-700 hover:bg-gray-100 rounded-lg transition"
+              className="flex items-center gap-2 px-3 py-2 text-gray-700 hover:bg-gray-100 rounded-lg transition-colors"
             >
               <Settings className="w-4 h-4" />
-              <span className="text-sm">Settings</span>
+              <span className="text-sm font-medium">Settings</span>
             </button>
           )}
         </div>
@@ -315,7 +320,7 @@ function Sidebar({
   const rootPages = pages.filter(p => !p.parent_id);
 
   return (
-    <aside className="w-80 bg-white border-r border-gray-200 flex flex-col">
+    <aside className="w-72 bg-gray-50 border-r border-gray-200 flex flex-col">
       <div className="p-4 border-b border-gray-200">
         <div className="relative mb-3">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
@@ -324,45 +329,45 @@ function Sidebar({
             placeholder="Search pages..."
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
-            className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none"
+            className="w-full pl-9 pr-3 py-2 border border-gray-300 bg-white rounded-lg text-sm focus:ring-1 focus:ring-gray-900 focus:border-gray-900 outline-none"
           />
         </div>
 
         {hasPermission(currentUserRole, 'canCreatePages') && (
           <button
             onClick={onCreatePage}
-            className="w-full flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition"
+            className="w-full flex items-center gap-2 px-3 py-2 bg-gray-900 text-white rounded-lg hover:bg-gray-800 transition-colors text-sm font-medium"
           >
             <Plus className="w-4 h-4" />
-            <span className="text-sm font-medium">New Page</span>
+            New Page
           </button>
         )}
       </div>
 
-      <nav className="flex-1 overflow-y-auto p-4">
-        <div className="space-y-1">
+      <nav className="flex-1 overflow-y-auto p-3">
+        <div className="space-y-1 mb-4">
           <button
             onClick={() => navigate(`/project/${projectId}`)}
-            className="w-full flex items-center gap-2 px-3 py-2 text-gray-700 hover:bg-gray-100 rounded-lg transition"
+            className="w-full flex items-center gap-2 px-3 py-2 text-gray-700 hover:bg-white rounded-lg transition-colors text-sm"
           >
             <Home className="w-4 h-4" />
-            <span className="text-sm font-medium">Overview</span>
+            <span className="font-medium">Overview</span>
           </button>
 
           <button
             onClick={() => navigate(`/project/${projectId}/board/main`)}
-            className="w-full flex items-center gap-2 px-3 py-2 text-gray-700 hover:bg-gray-100 rounded-lg transition"
+            className="w-full flex items-center gap-2 px-3 py-2 text-gray-700 hover:bg-white rounded-lg transition-colors text-sm"
           >
             <Layout className="w-4 h-4" />
-            <span className="text-sm font-medium">Kanban Board</span>
+            <span className="font-medium">Kanban Board</span>
           </button>
         </div>
 
-        <div className="mt-6">
+        <div>
           <h3 className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2 px-3">
             Pages
           </h3>
-          <div className="space-y-1">
+          <div className="space-y-0.5">
             {rootPages.map(page => (
               <PageTreeItem
                 key={page.id}
@@ -433,8 +438,8 @@ function PageTreeItem({
     <>
       <div>
         <div
-          className={`group flex items-center gap-2 px-3 py-2 rounded-lg cursor-pointer transition ${
-            selected ? 'bg-blue-50 text-blue-700' : 'text-gray-700 hover:bg-gray-100'
+          className={`group flex items-center gap-2 px-3 py-2 rounded-lg cursor-pointer transition-colors ${
+            selected ? 'bg-gray-900 text-white' : 'text-gray-700 hover:bg-white'
           }`}
           style={{ paddingLeft: `${12 + level * 16}px` }}
         >
@@ -473,19 +478,19 @@ function PageTreeItem({
                 e.stopPropagation();
                 setShowMenu(!showMenu);
               }}
-              className="p-1 opacity-0 group-hover:opacity-100 hover:bg-gray-200 rounded transition"
+              className={`p-1 opacity-0 group-hover:opacity-100 hover:bg-gray-200 rounded transition-all ${selected ? 'hover:bg-gray-800' : ''}`}
             >
               <MoreVertical className="w-3 h-3" />
             </button>
 
             {showMenu && (
-              <div className="absolute right-0 mt-1 w-48 bg-white rounded-lg shadow-lg border border-gray-200 py-1 z-10">
+              <div className="absolute right-0 mt-1 w-44 bg-white rounded-lg shadow-lg border border-gray-200 py-1 z-10">
                 <button
                   onClick={() => {
                     navigate(`/project/${projectId}/page/${page.id}`);
                     setShowMenu(false);
                   }}
-                  className="w-full px-4 py-2 text-left text-sm text-gray-700 hover:bg-gray-50 flex items-center gap-2"
+                  className="w-full px-3 py-2 text-left text-sm text-gray-700 hover:bg-gray-50 flex items-center gap-2"
                 >
                   <Edit className="w-4 h-4" />
                   Edit
@@ -497,7 +502,7 @@ function PageTreeItem({
                       setShowMenu(false);
                       await onDuplicate(page.id);
                     }}
-                    className="w-full px-4 py-2 text-left text-sm text-gray-700 hover:bg-gray-50 flex items-center gap-2"
+                    className="w-full px-3 py-2 text-left text-sm text-gray-700 hover:bg-gray-50 flex items-center gap-2"
                   >
                     <Copy className="w-4 h-4" />
                     Duplicate
@@ -505,13 +510,16 @@ function PageTreeItem({
                 )}
 
                 {hasPermission(currentUserRole, 'canDeletePages') && (
-                  <button
-                    onClick={handleDeleteClick}
-                    className="w-full px-4 py-2 text-left text-sm text-red-600 hover:bg-red-50 flex items-center gap-2"
-                  >
-                    <Trash2 className="w-4 h-4" />
-                    Delete
-                  </button>
+                  <>
+                    <div className="border-t border-gray-200 my-1"></div>
+                    <button
+                      onClick={handleDeleteClick}
+                      className="w-full px-3 py-2 text-left text-sm text-red-600 hover:bg-red-50 flex items-center gap-2"
+                    >
+                      <Trash2 className="w-4 h-4" />
+                      Delete
+                    </button>
+                  </>
                 )}
               </div>
             )}
@@ -544,8 +552,8 @@ function PageTreeItem({
 
       {/* Confirmation Dialog */}
       {showConfirmDialog && (
-        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-lg shadow-xl max-w-md w-full p-6">
+        <div className="fixed inset-0 bg-gray-900/50 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-xl shadow-xl max-w-md w-full p-6">
             <h3 className="text-lg font-semibold text-gray-900 mb-2">Delete Page?</h3>
             <p className="text-sm text-gray-600 mb-6">
               Are you sure you want to delete "{page.title}"? This action cannot be undone.
@@ -553,13 +561,13 @@ function PageTreeItem({
             <div className="flex gap-3">
               <button
                 onClick={() => setShowConfirmDialog(false)}
-                className="flex-1 px-4 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition"
+                className="flex-1 px-4 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition-colors font-medium"
               >
                 Cancel
               </button>
               <button
                 onClick={confirmDelete}
-                className="flex-1 px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition"
+                className="flex-1 px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors font-medium"
               >
                 Delete
               </button>
@@ -573,20 +581,20 @@ function PageTreeItem({
 
 function MainContent({ project, pages, projectId, navigate, onCreatePage, currentUserRole }) {
   return (
-    <main className="flex-1 overflow-y-auto p-8">
-      <div className="max-w-5xl mx-auto">
+    <main className="flex-1 overflow-y-auto p-8 bg-white">
+      <div className="max-w-4xl mx-auto">
         <div className="mb-8">
           <h2 className="text-3xl font-bold text-gray-900 mb-2">Welcome to {project.name}</h2>
           <p className="text-gray-600">Organize your team's work in one collaborative workspace</p>
         </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-8">
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-5 mb-8">
           <div
             onClick={() => navigate(`/project/${projectId}/board/main`)}
-            className="bg-white rounded-xl border-2 border-gray-200 p-6 hover:border-blue-500 hover:shadow-lg transition cursor-pointer group"
+            className="bg-gray-50 rounded-xl border border-gray-200 p-6 hover:border-gray-900 hover:shadow-md transition-all cursor-pointer group"
           >
-            <div className="w-12 h-12 bg-blue-100 rounded-lg flex items-center justify-center mb-4 group-hover:bg-blue-200 transition">
-              <Layout className="w-6 h-6 text-blue-600" />
+            <div className="w-11 h-11 bg-gray-100 rounded-lg flex items-center justify-center mb-4 group-hover:bg-gray-900 group-hover:text-white transition-colors">
+              <Layout className="w-5 h-5" />
             </div>
             <h3 className="text-lg font-semibold text-gray-900 mb-2">Kanban Board</h3>
             <p className="text-sm text-gray-600">
@@ -597,10 +605,10 @@ function MainContent({ project, pages, projectId, navigate, onCreatePage, curren
           {hasPermission(currentUserRole, 'canCreatePages') && (
             <div
               onClick={onCreatePage}
-              className="bg-white rounded-xl border-2 border-dashed border-gray-300 p-6 hover:border-blue-500 hover:bg-blue-50 transition cursor-pointer group"
+              className="bg-gray-50 rounded-xl border-2 border-dashed border-gray-300 p-6 hover:border-gray-900 hover:bg-gray-100 transition-all cursor-pointer group"
             >
-              <div className="w-12 h-12 bg-gray-100 rounded-lg flex items-center justify-center mb-4 group-hover:bg-blue-100 transition">
-                <Plus className="w-6 h-6 text-gray-600 group-hover:text-blue-600" />
+              <div className="w-11 h-11 bg-gray-100 rounded-lg flex items-center justify-center mb-4 group-hover:bg-gray-900 group-hover:text-white transition-colors">
+                <Plus className="w-5 h-5" />
               </div>
               <h3 className="text-lg font-semibold text-gray-900 mb-2">Create New Page</h3>
               <p className="text-sm text-gray-600">
@@ -619,7 +627,7 @@ function MainContent({ project, pages, projectId, navigate, onCreatePage, curren
               {hasPermission(currentUserRole, 'canCreatePages') && (
                 <button
                   onClick={onCreatePage}
-                  className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition"
+                  className="px-4 py-2 bg-gray-900 text-white rounded-lg hover:bg-gray-800 transition-colors font-medium"
                 >
                   Create First Page
                 </button>
@@ -631,11 +639,11 @@ function MainContent({ project, pages, projectId, navigate, onCreatePage, curren
                 <div
                   key={page.id}
                   onClick={() => navigate(`/project/${projectId}/page/${page.id}`)}
-                  className="flex items-center gap-3 p-3 hover:bg-gray-50 rounded-lg cursor-pointer transition"
+                  className="flex items-center gap-3 p-3 hover:bg-gray-50 rounded-lg cursor-pointer transition-colors"
                 >
                   <FileText className="w-5 h-5 text-gray-400" />
                   <div className="flex-1 min-w-0">
-                    <p className="font-medium text-gray-900 truncate">{page.title}</p>
+                    <p className="font-medium text-gray-900 truncate text-sm">{page.title}</p>
                     <p className="text-xs text-gray-500">
                       Updated {new Date(page.updated_at).toLocaleDateString()}
                     </p>
@@ -657,104 +665,99 @@ function ActivityItem({ activity }) {
     const metadata = activity.metadata || {};
 
     switch (metadata.action) {
-      // Member management activities
       case 'member_added':
         return {
           icon: UserPlus,
-          color: 'text-green-600 bg-green-100',
+          color: 'text-green-600 bg-green-50',
           message: `${userName} invited ${metadata.member_name || metadata.member_email} as ${metadata.role}`
         };
       
       case 'member_removed':
         return {
           icon: Trash2,
-          color: 'text-red-600 bg-red-100',
+          color: 'text-red-600 bg-red-50',
           message: `${userName} removed ${metadata.member_name} from the project`
         };
       
       case 'role_changed':
         return {
           icon: Shield,
-          color: 'text-blue-600 bg-blue-100',
+          color: 'text-blue-600 bg-blue-50',
           message: `${userName} changed a member's role to ${metadata.new_role}`
         };
       
-      // Page activities
       case 'page_duplicated':
         return {
           icon: Copy,
-          color: 'text-purple-600 bg-purple-100',
+          color: 'text-purple-600 bg-purple-50',
           message: `${userName} duplicated "${metadata.original_title}"`
         };
 
-      // Kanban card activities
       case 'card_created':
         return {
           icon: Plus,
-          color: 'text-green-600 bg-green-100',
+          color: 'text-green-600 bg-green-50',
           message: `${userName} created card "${metadata.card_title}" in ${metadata.column_name}`
         };
 
       case 'card_updated':
         return {
           icon: Edit,
-          color: 'text-blue-600 bg-blue-100',
+          color: 'text-blue-600 bg-blue-50',
           message: `${userName} updated card "${metadata.card_title}"`
         };
 
       case 'card_deleted':
         return {
           icon: Trash2,
-          color: 'text-red-600 bg-red-100',
+          color: 'text-red-600 bg-red-50',
           message: `${userName} deleted card "${metadata.card_title}"`
         };
 
       case 'card_moved':
         return {
           icon: Layout,
-          color: 'text-purple-600 bg-purple-100',
+          color: 'text-purple-600 bg-purple-50',
           message: `${userName} moved "${metadata.card_title}" from ${metadata.from_column} to ${metadata.to_column}`
         };
 
       case 'card_assigned':
         return {
           icon: User,
-          color: 'text-blue-600 bg-blue-100',
+          color: 'text-blue-600 bg-blue-50',
           message: `${userName} assigned "${metadata.card_title}" to ${metadata.assignee_name}`
         };
 
-      // Default page activities (fallback)
       default:
         if (activity.activity_type === 'page_created') {
           return {
             icon: FileText,
-            color: 'text-green-600 bg-green-100',
+            color: 'text-green-600 bg-green-50',
             message: `${userName} created page "${activity.page?.title || 'Untitled'}"`
           };
         } else if (activity.activity_type === 'page_updated') {
           return {
             icon: Edit,
-            color: 'text-blue-600 bg-blue-100',
+            color: 'text-blue-600 bg-blue-50',
             message: `${userName} updated page "${activity.page?.title || 'Untitled'}"`
           };
         } else if (activity.activity_type === 'page_deleted') {
           return {
             icon: Trash2,
-            color: 'text-red-600 bg-red-100',
+            color: 'text-red-600 bg-red-50',
             message: `${userName} deleted a page`
           };
         } else if (activity.activity_type === 'card_updated') {
-          // Handle card activities without specific action
           return {
             icon: Layout,
-            color: 'text-blue-600 bg-blue-100',
+            color: 'text-blue-600 bg-blue-50',
             message: `${userName} updated a card`
           };
         }
         
         return {
           icon: Activity,
-          color: 'text-gray-600 bg-gray-100',
+          color: 'text-gray-600 bg-gray-50',
           message: `${userName} performed an action`
         };
     }
@@ -764,7 +767,7 @@ function ActivityItem({ activity }) {
 
   return (
     <div className="flex gap-3">
-      <div className={`w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0 ${color}`}>
+      <div className={`w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0 ${color}`}>
         <Icon className="w-4 h-4" />
       </div>
       <div className="flex-1 min-w-0">
@@ -782,7 +785,7 @@ function ActivityFeed({ activities, show, onToggle }) {
     return (
       <button
         onClick={onToggle}
-        className="fixed right-0 top-1/2 -translate-y-1/2 bg-white border border-l-0 border-gray-200 rounded-l-lg p-2 hover:bg-gray-50 transition"
+        className="fixed right-0 top-1/2 -translate-y-1/2 bg-white border border-l-0 border-gray-200 rounded-l-lg p-2 hover:bg-gray-50 transition-colors shadow-sm"
       >
         <Activity className="w-5 h-5 text-gray-600" />
       </button>
@@ -790,15 +793,15 @@ function ActivityFeed({ activities, show, onToggle }) {
   }
 
   return (
-    <aside className="w-80 bg-white border-l border-gray-200 flex flex-col">
-      <div className="p-4 border-b border-gray-200 flex items-center justify-between">
+    <aside className="w-80 bg-gray-50 border-l border-gray-200 flex flex-col">
+      <div className="p-4 border-b border-gray-200 flex items-center justify-between bg-white">
         <div className="flex items-center gap-2">
           <Activity className="w-5 h-5 text-gray-600" />
           <h2 className="font-semibold text-gray-900">Activity Feed</h2>
         </div>
         <button
           onClick={onToggle}
-          className="p-1 hover:bg-gray-100 rounded transition"
+          className="p-1 hover:bg-gray-100 rounded transition-colors"
         >
           <X className="w-4 h-4 text-gray-600" />
         </button>
@@ -807,8 +810,8 @@ function ActivityFeed({ activities, show, onToggle }) {
       <div className="flex-1 overflow-y-auto p-4">
         {activities.length === 0 ? (
           <div className="text-center py-8">
-            <Clock className="w-12 h-12 text-gray-400 mx-auto mb-3" />
-            <p className="text-sm text-gray-600">No recent activity</p>
+            <Clock className="w-12 h-12 text-gray-300 mx-auto mb-3" />
+            <p className="text-sm text-gray-500">No recent activity</p>
           </div>
         ) : (
           <div className="space-y-4">
@@ -821,6 +824,7 @@ function ActivityFeed({ activities, show, onToggle }) {
     </aside>
   );
 }
+
 
 function CreatePageModal({ onClose, onCreate }) {
   const [title, setTitle] = useState('');
@@ -838,15 +842,23 @@ function CreatePageModal({ onClose, onCreate }) {
   return (
     <div
       onClick={onClose}
-      className="fixed inset-0 bg-gray-900/30 backdrop-blur-sm flex items-center justify-center z-40 p-4"
+      className="fixed inset-0 bg-gray-900/50 backdrop-blur-sm flex items-center justify-center z-50 p-4"
     >
       <div
         onClick={(e) => e.stopPropagation()}
-        className="bg-white rounded-2xl shadow-2xl max-w-md w-full p-6"
+        className="bg-white rounded-xl shadow-xl max-w-md w-full p-6"
       >
-        <h2 className="text-2xl font-bold text-gray-900 mb-6">Create New Page</h2>
+        <div className="flex items-center justify-between mb-6">
+          <h2 className="text-xl font-bold text-gray-900">Create New Page</h2>
+          <button
+            onClick={onClose}
+            className="p-1 hover:bg-gray-100 rounded-lg transition-colors"
+          >
+            <X className="w-5 h-5 text-gray-500" />
+          </button>
+        </div>
 
-        <form onSubmit={handleSubmit} className="space-y-4">
+        <form onSubmit={handleSubmit} className="space-y-5">
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-2">
               Page Title
@@ -857,23 +869,23 @@ function CreatePageModal({ onClose, onCreate }) {
               autoFocus
               value={title}
               onChange={(e) => setTitle(e.target.value)}
-              className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none"
+              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-1 focus:ring-gray-900 focus:border-gray-900 outline-none text-sm"
               placeholder="Enter page title..."
             />
           </div>
 
-          <div className="flex gap-3 pt-4">
+          <div className="flex gap-3">
             <button
               type="button"
               onClick={onClose}
-              className="flex-1 px-4 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition"
+              className="flex-1 px-4 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition-colors font-medium"
             >
               Cancel
             </button>
             <button
               type="submit"
               disabled={loading || !title.trim()}
-              className="flex-1 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition disabled:opacity-50"
+              className="flex-1 px-4 py-2 bg-gray-900 text-white rounded-lg hover:bg-gray-800 transition-colors font-medium disabled:opacity-50 disabled:cursor-not-allowed"
             >
               {loading ? 'Creating...' : 'Create Page'}
             </button>

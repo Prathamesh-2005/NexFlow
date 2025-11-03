@@ -17,15 +17,330 @@ import Mention from "@tiptap/extension-mention";
 import CodeBlockLowlight from '@tiptap/extension-code-block-lowlight';
 import { common, createLowlight } from 'lowlight';
 import Highlight from "@tiptap/extension-highlight";
+import TextAlign from "@tiptap/extension-text-align";
+import HorizontalRule from "@tiptap/extension-horizontal-rule";
 import { ReactRenderer } from '@tiptap/react';
 import tippy from 'tippy.js';
 import MentionList from './MentionList';
+import { supabase } from '../../config/supabaseClient';
 
 const lowlight = createLowlight(common);
 
 const COLORS = ['#FF6B6B', '#4ECDC4', '#45B7D1', '#FFA07A', '#98D8C8', '#F7DC6F'];
 
 export const getRandomColor = () => COLORS[Math.floor(Math.random() * COLORS.length)];
+
+// Image upload handler with enhanced logging
+export const uploadImage = async (file, toast) => {
+  console.log('🖼️ Starting image upload:', {
+    name: file.name,
+    type: file.type,
+    size: file.size
+  });
+
+  try {
+    // Validate file
+    if (!file.type.startsWith('image/')) {
+      const error = 'File must be an image';
+      console.error('❌ Upload failed:', error);
+      throw new Error(error);
+    }
+
+    // Max 5MB
+    if (file.size > 5 * 1024 * 1024) {
+      const error = 'Image must be less than 5MB';
+      console.error('❌ Upload failed:', error);
+      throw new Error(error);
+    }
+
+    // Generate unique filename
+    const fileExt = file.name.split('.').pop();
+    const fileName = `${Math.random().toString(36).substring(2)}-${Date.now()}.${fileExt}`;
+    const filePath = fileName;
+
+    console.log('📤 Uploading to Supabase:', filePath);
+
+    // Upload to Supabase storage
+    const { data, error } = await supabase.storage
+      .from('page-images')
+      .upload(filePath, file, {
+        cacheControl: '3600',
+        upsert: false
+      });
+
+    if (error) {
+      console.error('❌ Supabase upload error:', error);
+      throw error;
+    }
+
+    console.log('✅ Upload successful:', data);
+
+    // Get public URL
+    const { data: { publicUrl } } = supabase.storage
+      .from('page-images')
+      .getPublicUrl(filePath);
+
+    console.log('🔗 Public URL generated:', publicUrl);
+
+    if (toast) {
+      toast.success('Image uploaded successfully');
+    }
+
+    return publicUrl;
+  } catch (error) {
+    console.error('❌ Error uploading image:', error);
+    if (toast) {
+      toast.error(`Failed to upload image: ${error.message}`);
+    }
+    throw error;
+  }
+};
+
+// Custom Image extension with enhanced upload support and logging
+const CustomImage = Image.extend({
+  addAttributes() {
+    return {
+      ...this.parent?.(),
+      src: {
+        default: null,
+        parseHTML: element => element.getAttribute('src'),
+        renderHTML: attributes => {
+          if (!attributes.src) {
+            return {};
+          }
+          return { src: attributes.src };
+        },
+      },
+      alt: {
+        default: null,
+        parseHTML: element => element.getAttribute('alt'),
+        renderHTML: attributes => {
+          if (!attributes.alt) {
+            return {};
+          }
+          return { alt: attributes.alt };
+        },
+      },
+      title: {
+        default: null,
+        parseHTML: element => element.getAttribute('title'),
+        renderHTML: attributes => {
+          if (!attributes.title) {
+            return {};
+          }
+          return { title: attributes.title };
+        },
+      },
+      width: {
+        default: null,
+        parseHTML: element => element.getAttribute('width'),
+        renderHTML: attributes => {
+          if (!attributes.width) {
+            return {};
+          }
+          return { width: attributes.width };
+        },
+      },
+      height: {
+        default: null,
+        parseHTML: element => element.getAttribute('height'),
+        renderHTML: attributes => {
+          if (!attributes.height) {
+            return {};
+          }
+          return { height: attributes.height };
+        },
+      },
+    };
+  },
+
+  addCommands() {
+    return {
+      ...this.parent?.(),
+      setImage: (options) => ({ commands, state }) => {
+        console.log('🎨 Inserting image into editor:', options);
+        
+        const { selection } = state;
+        const position = selection.$head ? selection.$head.pos : 0;
+        
+        console.log('📍 Insert position:', position);
+        
+        const result = commands.insertContent({
+          type: this.name,
+          attrs: options,
+        });
+        
+        console.log('✅ Image insertion result:', result);
+        return result;
+      },
+      uploadAndInsertImage: (file, toast) => async ({ editor }) => {
+        console.log('🚀 Starting uploadAndInsertImage command');
+        
+        try {
+          // Show loading toast
+          if (toast) {
+            toast.info('Uploading image...');
+          }
+
+          // Upload image first
+          const url = await uploadImage(file, toast);
+
+          console.log('🎯 Image uploaded, URL:', url);
+
+          // Insert image using setImage command (without focus)
+          // We'll handle focus separately in the toolbar
+          const success = editor.commands.setImage({ 
+            src: url,
+            alt: file.name,
+          });
+
+          console.log('📝 Image insertion command success:', success);
+
+          if (success) {
+            console.log('✅ Image inserted successfully into editor');
+            
+            // Verify the image is in the document
+            setTimeout(() => {
+              const html = editor.getHTML();
+              const hasImage = html.includes('<img');
+              const imgMatch = html.match(/<img[^>]*src="([^"]*)"[^>]*>/);
+              console.log('📄 Editor HTML verification:', {
+                hasImage,
+                imageUrl: imgMatch ? imgMatch[1] : 'NO IMAGE FOUND',
+                fullHTML: html,
+                htmlLength: html.length
+              });
+              
+              // Check if image is actually in the DOM
+              const editorImages = document.querySelectorAll('.ProseMirror img');
+              console.log('🖼️ Images in DOM:', editorImages.length, Array.from(editorImages).map(img => img.src));
+            }, 100);
+          } else {
+            console.error('❌ Image insertion command returned false');
+          }
+
+          return success;
+        } catch (error) {
+          console.error('❌ Upload and insert failed:', error);
+          if (toast) {
+            toast.error(`Failed to upload image: ${error.message}`);
+          }
+          return false;
+        }
+      },
+    };
+  },
+
+  addProseMirrorPlugins() {
+    return [
+      new Plugin({
+        key: new PluginKey('imageDrop'),
+        props: {
+          handleDOMEvents: {
+            drop: (view, event) => {
+              console.log('📦 Drop event detected');
+              
+              const hasFiles = event.dataTransfer?.files?.length;
+
+              if (!hasFiles) {
+                console.log('⏭️ No files in drop event');
+                return false;
+              }
+
+              const images = Array.from(event.dataTransfer.files).filter(file =>
+                file.type.startsWith('image/')
+              );
+
+              console.log('🖼️ Images found in drop:', images.length);
+
+              if (images.length === 0) {
+                return false;
+              }
+
+              event.preventDefault();
+
+              const { schema } = view.state;
+              const coordinates = view.posAtCoords({
+                left: event.clientX,
+                top: event.clientY,
+              });
+
+              console.log('📍 Drop coordinates:', coordinates);
+
+              images.forEach(async (image, index) => {
+                try {
+                  console.log(`📤 Processing dropped image ${index + 1}/${images.length}`);
+                  const url = await uploadImage(image);
+                  
+                  console.log('✅ Upload complete, inserting at position:', coordinates.pos);
+                  
+                  const node = schema.nodes.image.create({ 
+                    src: url,
+                    alt: image.name,
+                  });
+                  
+                  const transaction = view.state.tr.insert(coordinates.pos, node);
+                  view.dispatch(transaction);
+                  
+                  console.log('✅ Image node inserted via drop');
+                } catch (error) {
+                  console.error('❌ Failed to upload dropped image:', error);
+                }
+              });
+
+              return true;
+            },
+            paste: (view, event) => {
+              console.log('📋 Paste event detected');
+              
+              const hasFiles = event.clipboardData?.files?.length;
+
+              if (!hasFiles) {
+                console.log('⏭️ No files in paste event');
+                return false;
+              }
+
+              const images = Array.from(event.clipboardData.files).filter(file =>
+                file.type.startsWith('image/')
+              );
+
+              console.log('🖼️ Images found in paste:', images.length);
+
+              if (images.length === 0) {
+                return false;
+              }
+
+              event.preventDefault();
+
+              images.forEach(async (image, index) => {
+                try {
+                  console.log(`📤 Processing pasted image ${index + 1}/${images.length}`);
+                  const url = await uploadImage(image);
+                  
+                  console.log('✅ Upload complete, inserting via paste');
+                  
+                  const node = view.state.schema.nodes.image.create({ 
+                    src: url,
+                    alt: `pasted-image-${Date.now()}`,
+                  });
+                  
+                  const transaction = view.state.tr.replaceSelectionWith(node);
+                  view.dispatch(transaction);
+                  
+                  console.log('✅ Image node inserted via paste');
+                } catch (error) {
+                  console.error('❌ Failed to upload pasted image:', error);
+                }
+              });
+
+              return true;
+            },
+          },
+        },
+      }),
+    ];
+  },
+});
 
 const CursorPluginKey = new PluginKey('customCursors');
 export const CustomCursors = Extension.create({
@@ -138,6 +453,7 @@ export function getEditorExtensions(yDoc, mentionUsers = [], cursorOptions = {})
     StarterKit.configure({
       history: false,
       codeBlock: false,
+      horizontalRule: false,
     }),
     Underline,
     Link.configure({ 
@@ -146,11 +462,20 @@ export function getEditorExtensions(yDoc, mentionUsers = [], cursorOptions = {})
         class: 'text-blue-600 underline hover:text-blue-800 cursor-pointer',
       },
     }),
-    Image.configure({ 
-      inline: true, 
+    CustomImage.configure({ 
+      inline: false,
       allowBase64: true,
       HTMLAttributes: {
-        class: 'rounded-lg max-w-full h-auto my-2',
+        class: 'rounded-lg max-w-full h-auto my-2 cursor-pointer block',
+      },
+    }),
+    TextAlign.configure({
+      types: ['heading', 'paragraph'],
+      alignments: ['left', 'center', 'right', 'justify'],
+    }),
+    HorizontalRule.configure({
+      HTMLAttributes: {
+        class: 'my-4 border-gray-300',
       },
     }),
     Table.configure({ 

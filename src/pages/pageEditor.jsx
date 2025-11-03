@@ -24,13 +24,33 @@ function CollaborativeEditor({
   onUpdate, 
   editorInstance, 
   cursorPositions, 
-  broadcastCursor 
+  broadcastCursor,
+  initialContent,
+  toast // Added toast prop
 }) {
   const cursorRef = useRef(cursorPositions);
+  const hasSetInitialContent = useRef(false);
+  const isEditorReady = useRef(false);
+  const docRef = useRef(doc);
+  const mentionUsersRef = useRef(mentionUsers);
+  const broadcastCursorRef = useRef(broadcastCursor);
   
+  // Update refs when values change
   useEffect(() => {
     cursorRef.current = cursorPositions;
   }, [cursorPositions]);
+
+  useEffect(() => {
+    docRef.current = doc;
+  }, [doc]);
+
+  useEffect(() => {
+    mentionUsersRef.current = mentionUsers;
+  }, [mentionUsers]);
+
+  useEffect(() => {
+    broadcastCursorRef.current = broadcastCursor;
+  }, [broadcastCursor]);
 
   const editor = useEditor({
     extensions: getEditorExtensions(doc, mentionUsers, {
@@ -40,15 +60,34 @@ function CollaborativeEditor({
     editorProps,
     editable: canEdit,
     autofocus: canEdit,
+    content: initialContent || '',
+    onCreate: ({ editor }) => {
+      console.log('📝 Editor created with content:', editor.getHTML().substring(0, 100));
+      isEditorReady.current = true;
+    },
     onUpdate: ({ editor }) => {
-      if (canEdit) {
-        onUpdate(editor.getHTML());
+      if (canEdit && isEditorReady.current) {
+        const html = editor.getHTML();
+        console.log('📝 Editor updated, content has images:', html.includes('<img'));
+        onUpdate(html);
       }
     },
-  }, [doc, mentionUsers, broadcastCursor]);
+  }, []); // Empty dependency array - only create editor once!
 
+  // Set initial content when editor is ready - ONLY ONCE
+  useEffect(() => {
+    if (editor && initialContent && !hasSetInitialContent.current && isEditorReady.current) {
+      console.log('🔄 Setting initial content in editor:', initialContent.substring(0, 100));
+      editor.commands.setContent(initialContent);
+      hasSetInitialContent.current = true;
+    }
+  }, [editor, initialContent]);
+
+  // Update cursor positions dynamically
   useEffect(() => {
     if (!editor) return;
+    
+    console.log('🔄 Updating cursor positions:', Object.keys(cursorPositions).length);
     
     const cursorsExt = editor.extensionManager.extensions.find(
       ext => ext.name === 'customCursors'
@@ -56,6 +95,7 @@ function CollaborativeEditor({
     
     if (cursorsExt) {
       cursorsExt.options.cursors = cursorPositions;
+      cursorsExt.options.onCursorUpdate = broadcastCursorRef.current;
       const tr = editor.state.tr;
       editor.view.dispatch(tr);
     }
@@ -77,7 +117,7 @@ function CollaborativeEditor({
     return (
       <div className="flex items-center justify-center p-12">
         <div className="text-center">
-          <div className="w-12 h-12 border-4 border-blue-600 border-t-transparent rounded-full animate-spin mx-auto mb-3"></div>
+          <div className="w-12 h-12 border-4 border-gray-900 border-t-transparent rounded-full animate-spin mx-auto mb-3"></div>
           <p className="text-gray-600">Loading editor...</p>
         </div>
       </div>
@@ -86,7 +126,7 @@ function CollaborativeEditor({
 
   return (
     <>
-      <EditorToolbar editor={editor} />
+      <EditorToolbar editor={editor} toast={toast} />
       <div className="flex-1 overflow-y-auto">
         <EditorContent editor={editor} />
       </div>
@@ -113,6 +153,7 @@ export default function PageEditor() {
   const [breadcrumbs, setBreadcrumbs] = useState([]);
   const [isOnline, setIsOnline] = useState(navigator.onLine);
   const [isInitializing, setIsInitializing] = useState(true);
+  const [initialContent, setInitialContent] = useState('');
   
   const userColor = useRef(getRandomColor());
   const saveTimeoutRef = useRef(null);
@@ -219,10 +260,15 @@ export default function PageEditor() {
         setPage(pageData);
         setTitle(pageData.title || 'Untitled Page');
         
+        // Extract and set initial content
         if (pageData.content) {
-          editorContentRef.current = typeof pageData.content === 'string' 
+          const content = typeof pageData.content === 'string' 
             ? pageData.content 
             : (pageData.content.content || '');
+          
+          console.log('📄 Loading initial content:', content.substring(0, 100));
+          editorContentRef.current = content;
+          setInitialContent(content);
         }
 
         const { data: roleData } = await supabase
@@ -382,6 +428,8 @@ export default function PageEditor() {
     const oldContent = editorContentRef.current;
     editorContentRef.current = content;
 
+    console.log('💾 Content updated, has images:', content.includes('<img'));
+
     // Process mention notifications with debounce
     if (currentUser && mentionUsers.length > 0 && projectName) {
       debouncedProcessMentionNotifications({
@@ -394,7 +442,7 @@ export default function PageEditor() {
         currentUser,
         mentionUsers,
         toast,
-      }, 3000); // 3 second debounce
+      }, 3000);
     }
 
     if (saveTimeoutRef.current) {
@@ -415,6 +463,7 @@ export default function PageEditor() {
         if (error) throw error;
         
         setLastSaved(new Date());
+        console.log('✅ Content saved successfully');
       } catch (error) {
         console.error('Save error:', error);
         toast.error('Failed to save changes');
@@ -448,7 +497,7 @@ export default function PageEditor() {
       message: 'Restore this version? Current content will be saved as a new version.',
       confirmText: 'Restore',
       cancelText: 'Cancel',
-      confirmVariant: 'primary'
+      confirmVariant: 'default'
     });
 
     if (!confirmed) return;
@@ -533,7 +582,7 @@ export default function PageEditor() {
     return (
       <div className="min-h-screen flex items-center justify-center bg-gray-50">
         <div className="text-center">
-          <div className="w-16 h-16 border-4 border-blue-600 border-t-transparent rounded-full animate-spin mx-auto mb-4"></div>
+          <div className="w-16 h-16 border-4 border-gray-900 border-t-transparent rounded-full animate-spin mx-auto mb-4"></div>
           <p className="text-gray-900 font-semibold text-lg mb-2">Loading Editor</p>
           <p className="text-gray-500 text-sm">
             {!currentUser ? 'Loading user data...' : 
@@ -596,6 +645,8 @@ export default function PageEditor() {
             editorInstance={editorRef}
             cursorPositions={cursorPositions}
             broadcastCursor={broadcastCursor}
+            initialContent={initialContent}
+            toast={toast}
           />
         </div>
 

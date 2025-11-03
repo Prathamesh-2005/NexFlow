@@ -125,8 +125,10 @@ const ConfirmationDialog = ({
   onCancel 
 }) => {
   const confirmButtonClass = confirmVariant === 'danger'
-    ? 'flex-1 px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition'
-    : 'flex-1 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition';
+  ? 'flex-1 px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition font-medium'
+  : confirmVariant === 'default'
+  ? 'flex-1 px-4 py-2 bg-gray-900 text-white rounded-lg hover:bg-gray-800 transition font-medium'
+  : 'flex-1 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition font-medium';
 
   return (
     <div 

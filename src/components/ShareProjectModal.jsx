@@ -43,7 +43,7 @@ export default function ShareProjectModal({
   const [email, setEmail] = useState('');
   const [selectedRole, setSelectedRole] = useState('editor');
   const [inviting, setInviting] = useState(false);
-  const [showRoleMenu, setShowRoleMenu] = useState(null);
+  const [changingRole, setChangingRole] = useState(null);
   const [members, setMembers] = useState([]);
   const [loading, setLoading] = useState(true);
   const [removingMember, setRemovingMember] = useState(null);
@@ -85,53 +85,49 @@ export default function ShareProjectModal({
       setLoading(false);
     }
   };
-const sendEmailInvitation = async (userEmail, userName, role) => {
-  try {
-    // ✅ Get current session to include auth token in the request
-    const { data: { session } } = await supabase.auth.getSession();
 
-    if (!session) {
-      console.error('No active session for sending email');
-      return;
-    }
+  const sendEmailInvitation = async (userEmail, userName, role) => {
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
 
-    // ✅ Build the payload
-    const payload = {
-      to: userEmail,
-      userName: userName,
-      projectName: project.name,
-      role: ROLES[role].label,
-      projectLink: `${window.location.origin}/project/${project.id}`,
-      inviterName: session.user.user_metadata?.full_name || session.user.email,
-    };
-
-    // ✅ Call your Supabase Edge Function (production endpoint)
-    const response = await fetch(
-      'https://xwornhdmzntowndxavrk.supabase.co/functions/v1/resend-email',
-      {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${session.access_token}`, // important!
-        },
-        body: JSON.stringify(payload),
+      if (!session) {
+        console.error('No active session for sending email');
+        return;
       }
-    );
 
-    const result = await response.json();
+      const payload = {
+        to: userEmail,
+        userName: userName,
+        projectName: project.name,
+        role: ROLES[role].label,
+        projectLink: `${window.location.origin}/project/${project.id}`,
+        inviterName: session.user.user_metadata?.full_name || session.user.email,
+      };
 
-    if (!response.ok) {
-      console.error('Failed to send email invitation:', result.error || result);
-    } else {
-      console.log('✅ Email sent successfully:', result);
+      const response = await fetch(
+        'https://xwornhdmzntowndxavrk.supabase.co/functions/v1/resend-email',
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${session.access_token}`,
+          },
+          body: JSON.stringify(payload),
+        }
+      );
+
+      const result = await response.json();
+
+      if (!response.ok) {
+        console.error('Failed to send email invitation:', result.error || result);
+      } else {
+        console.log('✅ Email sent successfully:', result);
+      }
+
+    } catch (error) {
+      console.error('❌ Error sending email:', error);
     }
-
-  } catch (error) {
-    console.error('❌ Error sending email:', error);
-    // You can show a toast instead of console if you want
-  }
-};
-
+  };
 
   const handleInvite = async (e) => {
     e.preventDefault();
@@ -176,7 +172,6 @@ const sendEmailInvitation = async (userEmail, userName, role) => {
 
       if (memberError) throw memberError;
 
-      // Send in-app notification
       await supabase.from('notifications').insert({
         user_id: userProfile.id,
         title: 'Project Invitation',
@@ -185,14 +180,12 @@ const sendEmailInvitation = async (userEmail, userName, role) => {
         link: `/project/${project.id}`
       });
 
-      // Send email invitation (non-blocking)
       sendEmailInvitation(
         userProfile.email, 
         userProfile.full_name || userProfile.email,
         selectedRole
       );
 
-      // Log activity with correct type
       await supabase.from('activities').insert({
         project_id: project.id,
         user_id: currentUserId,
@@ -205,7 +198,6 @@ const sendEmailInvitation = async (userEmail, userName, role) => {
         }
       });
 
-      // Optimistically update UI
       setMembers([...members, newMember]);
       toast.success(`${userProfile.full_name || email} has been added to the project!`);
       setEmail('');
@@ -218,7 +210,9 @@ const sendEmailInvitation = async (userEmail, userName, role) => {
     }
   };
 
-  const handleRoleChange = async (memberId, userId, newRole) => {
+  const handleRoleChange = async (newRole) => {
+    const { memberId, userId } = changingRole;
+    
     try {
       const { error } = await supabase
         .from('project_members')
@@ -227,7 +221,6 @@ const sendEmailInvitation = async (userEmail, userName, role) => {
 
       if (error) throw error;
 
-      // Optimistic UI update
       setMembers(members.map(m => m.id === memberId ? { ...m, role: newRole } : m));
 
       await supabase.from('notifications').insert({
@@ -246,12 +239,12 @@ const sendEmailInvitation = async (userEmail, userName, role) => {
       });
 
       toast.success('Role updated successfully');
-      setShowRoleMenu(null);
+      setChangingRole(null);
     } catch (err) {
       console.error('Error updating role:', err);
       toast.error('Failed to update role');
-      // Revert optimistic update on error
       fetchMembers();
+      setChangingRole(null);
     }
   };
 
@@ -265,7 +258,6 @@ const sendEmailInvitation = async (userEmail, userName, role) => {
     try {
       await supabase.from('project_members').delete().eq('id', memberId);
       
-      // Optimistic UI update
       setMembers(members.filter(m => m.id !== memberId));
 
       await supabase.from('notifications').insert({
@@ -288,7 +280,6 @@ const sendEmailInvitation = async (userEmail, userName, role) => {
     } catch (err) {
       console.error('Error removing member:', err);
       toast.error('Failed to remove member');
-      // Revert optimistic update on error
       fetchMembers();
       setRemovingMember(null);
     }
@@ -303,22 +294,22 @@ const sendEmailInvitation = async (userEmail, userName, role) => {
   return (
     <div 
       onClick={onClose}
-      className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 p-4"
+      className="fixed inset-0 bg-gray-900/50 backdrop-blur-sm flex items-center justify-center z-50 p-4"
     >
       <div 
         onClick={(e) => e.stopPropagation()}
-        className="bg-white rounded-2xl shadow-2xl max-w-2xl w-full max-h-[90vh] overflow-hidden flex flex-col"
+        className="bg-white rounded-xl shadow-xl max-w-2xl w-full max-h-[90vh] overflow-hidden flex flex-col"
       >
         {/* Header */}
         <div className="p-6 border-b border-gray-200 flex-shrink-0">
           <div className="flex items-center justify-between">
             <div>
-              <h2 className="text-2xl font-bold text-gray-900">Share Project</h2>
+              <h2 className="text-xl font-bold text-gray-900">Share Project</h2>
               <p className="text-sm text-gray-600 mt-1">{project.name}</p>
             </div>
             <button 
               onClick={onClose} 
-              className="p-2 hover:bg-gray-100 rounded-lg transition"
+              className="p-2 hover:bg-gray-100 rounded-lg transition-colors"
             >
               <X className="w-5 h-5 text-gray-600" />
             </button>
@@ -339,14 +330,14 @@ const sendEmailInvitation = async (userEmail, userName, role) => {
                       value={email}
                       onChange={(e) => setEmail(e.target.value)}
                       placeholder="Enter email address..."
-                      className="w-full pl-10 pr-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none transition"
+                      className="w-full pl-10 pr-4 py-3 border border-gray-300 rounded-lg focus:ring-1 focus:ring-gray-900 focus:border-gray-900 outline-none transition text-sm"
                     />
                   </div>
                   <div className="flex gap-3">
                     <select
                       value={selectedRole}
                       onChange={(e) => setSelectedRole(e.target.value)}
-                      className="px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none bg-white transition min-w-[120px]"
+                      className="px-4 py-3 border border-gray-300 rounded-lg focus:ring-1 focus:ring-gray-900 focus:border-gray-900 outline-none bg-white transition min-w-[120px] text-sm"
                     >
                       <option value="viewer">Viewer</option>
                       <option value="editor">Editor</option>
@@ -355,7 +346,7 @@ const sendEmailInvitation = async (userEmail, userName, role) => {
                     <button
                       type="submit"
                       disabled={inviting || !email.trim()}
-                      className="px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed font-medium transition whitespace-nowrap flex items-center gap-2"
+                      className="px-6 py-3 bg-gray-900 text-white rounded-lg hover:bg-gray-800 disabled:opacity-50 disabled:cursor-not-allowed font-medium transition whitespace-nowrap flex items-center gap-2"
                     >
                       {inviting ? (
                         <>
@@ -376,18 +367,18 @@ const sendEmailInvitation = async (userEmail, userName, role) => {
               {/* Copy Link Button */}
               <button
                 onClick={copyProjectLink}
-                className="w-full mt-3 flex items-center justify-center gap-2 px-4 py-2.5 border-2 border-dashed border-gray-300 rounded-lg hover:border-blue-400 hover:bg-blue-50 transition group"
+                className="w-full mt-3 flex items-center justify-center gap-2 px-4 py-2.5 border-2 border-dashed border-gray-300 rounded-lg hover:border-gray-900 hover:bg-gray-50 transition group"
               >
-                <Link className="w-4 h-4 text-gray-600 group-hover:text-blue-600 transition" />
-                <span className="text-sm font-medium text-gray-700 group-hover:text-blue-600 transition">
+                <Link className="w-4 h-4 text-gray-600 group-hover:text-gray-900 transition" />
+                <span className="text-sm font-medium text-gray-700 group-hover:text-gray-900 transition">
                   Copy Project Link
                 </span>
               </button>
 
               {/* Info Box */}
-              <div className="mt-3 p-3 bg-blue-50 border border-blue-200 rounded-lg flex gap-2">
-                <AlertCircle className="w-5 h-5 text-blue-600 flex-shrink-0 mt-0.5" />
-                <p className="text-xs text-blue-800">
+              <div className="mt-3 p-3 bg-gray-50 border border-gray-200 rounded-lg flex gap-2">
+                <AlertCircle className="w-5 h-5 text-gray-600 flex-shrink-0 mt-0.5" />
+                <p className="text-xs text-gray-700">
                   <strong>Note:</strong> Invited users must have an account to access the project. 
                   They will receive an in-app notification and email.
                 </p>
@@ -404,7 +395,7 @@ const sendEmailInvitation = async (userEmail, userName, role) => {
             
             {loading ? (
               <div className="text-center py-12">
-                <div className="w-8 h-8 border-4 border-blue-600 border-t-transparent rounded-full animate-spin mx-auto mb-3"></div>
+                <div className="w-8 h-8 border-4 border-gray-900 border-t-transparent rounded-full animate-spin mx-auto mb-3"></div>
                 <p className="text-sm text-gray-600">Loading members...</p>
               </div>
             ) : members.length === 0 ? (
@@ -433,7 +424,7 @@ const sendEmailInvitation = async (userEmail, userName, role) => {
                             className="w-10 h-10 rounded-full object-cover border-2 border-gray-200" 
                           />
                         ) : (
-                          <div className="w-10 h-10 rounded-full bg-gradient-to-br from-blue-500 to-purple-500 flex items-center justify-center text-white font-semibold border-2 border-gray-200">
+                          <div className="w-10 h-10 rounded-full bg-gradient-to-br from-gray-700 to-gray-900 flex items-center justify-center text-white font-semibold border-2 border-gray-200">
                             {(member.profiles.full_name?.[0] || member.profiles.email[0]).toUpperCase()}
                           </div>
                         )}
@@ -441,7 +432,7 @@ const sendEmailInvitation = async (userEmail, userName, role) => {
                           <p className="font-medium truncate text-gray-900">
                             {member.profiles.full_name || member.profiles.email}
                             {isCurrentUser && (
-                              <span className="ml-2 text-xs text-blue-600 font-semibold">(You)</span>
+                              <span className="ml-2 text-xs text-gray-600 font-semibold">(You)</span>
                             )}
                           </p>
                           <p className="text-sm text-gray-600 truncate">{member.profiles.email}</p>
@@ -450,54 +441,26 @@ const sendEmailInvitation = async (userEmail, userName, role) => {
 
                       {/* Role Badge & Actions */}
                       <div className="flex items-center gap-2 flex-shrink-0">
-                        <div className="relative">
-                          <button
-                            onClick={() => canModify && setShowRoleMenu(showRoleMenu === member.id ? null : member.id)}
-                            disabled={!canModify}
-                            className={`flex items-center gap-2 px-3 py-1.5 rounded-lg border text-sm font-medium transition ${ROLES[member.role].color} ${
-                              canModify ? 'cursor-pointer hover:opacity-80' : 'cursor-default'
-                            }`}
-                          >
-                            <RoleIcon className="w-4 h-4" />
-                            <span>{ROLES[member.role].label}</span>
-                            {canModify && <ChevronDown className="w-3 h-3" />}
-                          </button>
-
-                          {/* Role Dropdown */}
-                          {showRoleMenu === member.id && (
-                            <>
-                              <div 
-                                className="fixed inset-0 z-10" 
-                                onClick={() => setShowRoleMenu(null)}
-                              />
-                              <div className="absolute right-0 mt-2 w-64 bg-white rounded-lg shadow-xl border border-gray-200 py-2 z-20">
-                                {Object.entries(ROLES).map(([roleKey, roleInfo]) => {
-                                  if (roleKey === 'owner' && !canChangeRoles) return null;
-                                  const Icon = roleInfo.icon;
-                                  const isSelected = member.role === roleKey;
-                                  return (
-                                    <button
-                                      key={roleKey}
-                                      onClick={() => handleRoleChange(member.id, member.user_id, roleKey)}
-                                      className={`w-full px-4 py-2.5 text-left hover:bg-gray-50 flex items-start gap-3 transition ${
-                                        isSelected ? 'bg-blue-50' : ''
-                                      }`}
-                                    >
-                                      <Icon className={`w-5 h-5 mt-0.5 flex-shrink-0 ${roleInfo.color.split(' ')[0]}`} />
-                                      <div className="flex-1 min-w-0">
-                                        <div className="flex items-center gap-2">
-                                          <p className="font-medium text-sm text-gray-900">{roleInfo.label}</p>
-                                          {isSelected && <Check className="w-4 h-4 text-blue-600" />}
-                                        </div>
-                                        <p className="text-xs text-gray-600 mt-0.5">{roleInfo.description}</p>
-                                      </div>
-                                    </button>
-                                  );
-                                })}
-                              </div>
-                            </>
-                          )}
+                        <div className={`flex items-center gap-2 px-3 py-1.5 rounded-lg border text-sm font-medium ${ROLES[member.role].color}`}>
+                          <RoleIcon className="w-4 h-4" />
+                          <span>{ROLES[member.role].label}</span>
                         </div>
+
+                        {/* Change Role Button */}
+                        {canModify && (
+                          <button
+                            onClick={() => setChangingRole({ 
+                              memberId: member.id, 
+                              userId: member.user_id, 
+                              currentRole: member.role,
+                              memberName: member.profiles.full_name || member.profiles.email
+                            })}
+                            className="px-3 py-1.5 text-sm font-medium text-gray-700 hover:bg-gray-200 rounded-lg transition"
+                            title="Change role"
+                          >
+                            Change Role
+                          </button>
+                        )}
 
                         {/* Remove Button */}
                         {canModify && (
@@ -523,41 +486,90 @@ const sendEmailInvitation = async (userEmail, userName, role) => {
       {removingMember && (
         <div 
           onClick={() => setRemovingMember(null)}
-          className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-[60] p-4"
+          className="fixed inset-0 bg-gray-900/50 backdrop-blur-sm flex items-center justify-center z-[60] p-4"
         >
           <div 
             onClick={(e) => e.stopPropagation()}
-            className="bg-white rounded-2xl shadow-2xl max-w-md w-full p-6"
+            className="bg-white rounded-xl shadow-xl max-w-md w-full p-6"
           >
-            <div className="flex items-start gap-4 mb-6">
-              <div className="w-12 h-12 rounded-full bg-red-100 flex items-center justify-center flex-shrink-0">
-                <AlertCircle className="w-6 h-6 text-red-600" />
-              </div>
-              <div className="flex-1">
-                <h3 className="text-lg font-bold text-gray-900 mb-2">Remove Member?</h3>
-                <p className="text-sm text-gray-600">
-                  Are you sure you want to remove <span className="font-semibold">{removingMember.memberName}</span> from this project?
-                </p>
-                <p className="text-sm text-red-600 font-medium mt-2">
-                  They will lose access immediately.
-                </p>
-              </div>
-            </div>
+            <h3 className="text-lg font-semibold text-gray-900 mb-2">Remove Member?</h3>
+            <p className="text-sm text-gray-600 mb-6">
+              Are you sure you want to remove <span className="font-semibold">{removingMember.memberName}</span> from this project? They will lose access immediately.
+            </p>
 
             <div className="flex gap-3">
               <button
                 onClick={() => setRemovingMember(null)}
-                className="flex-1 px-4 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition font-medium"
+                className="flex-1 px-4 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition-colors font-medium"
               >
                 Cancel
               </button>
               <button
                 onClick={confirmRemoveMember}
-                className="flex-1 px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition font-medium"
+                className="flex-1 px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors font-medium"
               >
                 Remove Member
               </button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* Change Role Modal */}
+      {changingRole && (
+        <div 
+          onClick={() => setChangingRole(null)}
+          className="fixed inset-0 bg-gray-900/50 backdrop-blur-sm flex items-center justify-center z-[60] p-4"
+        >
+          <div 
+            onClick={(e) => e.stopPropagation()}
+            className="bg-white rounded-xl shadow-xl max-w-md w-full p-6"
+          >
+            <h3 className="text-lg font-semibold text-gray-900 mb-2">Change Role</h3>
+            <p className="text-sm text-gray-600 mb-6">
+              Select a new role for <span className="font-semibold">{changingRole.memberName}</span>
+            </p>
+
+            <div className="space-y-2 mb-6">
+              {Object.entries(ROLES).map(([roleKey, roleInfo]) => {
+                if (roleKey === 'owner' && !canChangeRoles) return null;
+                const Icon = roleInfo.icon;
+                const isSelected = changingRole.currentRole === roleKey;
+                
+                return (
+                  <button
+                    key={roleKey}
+                    onClick={() => handleRoleChange(roleKey)}
+                    className={`w-full px-4 py-3 text-left rounded-lg border-2 transition flex items-start gap-3 ${
+                      isSelected 
+                        ? 'border-gray-900 bg-gray-50' 
+                        : 'border-gray-200 hover:border-gray-300 hover:bg-gray-50'
+                    }`}
+                  >
+                    <Icon className={`w-5 h-5 mt-0.5 flex-shrink-0 ${roleInfo.color.split(' ')[0]}`} />
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center justify-between gap-2">
+                        <p className="font-medium text-sm text-gray-900">{roleInfo.label}</p>
+                        {isSelected && (
+                          <div className="flex items-center gap-1 text-xs font-medium text-gray-600">
+                            <Check className="w-4 h-4" />
+                            Current
+                          </div>
+                        )}
+                      </div>
+                      <p className="text-xs text-gray-600 mt-1">{roleInfo.description}</p>
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
+
+            <button
+              onClick={() => setChangingRole(null)}
+              className="w-full px-4 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition-colors font-medium"
+            >
+              Cancel
+            </button>
           </div>
         </div>
       )}

@@ -1,10 +1,11 @@
-import React, { useState, useEffect, useRef, useCallback } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { EditorContent, useEditor } from "@tiptap/react";
 import { supabase } from '../config/supabaseClient';
 import { getEditorExtensions, editorProps } from '../components/editor/editorConfig';
 import { useCollaboration } from '../utils/useCollaboration';
 import { hasPermission } from '../utils/permissions';
+import { debouncedProcessMentionNotifications } from '../utils/mentionNotifications';
 import EditorToolbar from '../components/editor/EditorToolbar';
 import EditorHeader from '../components/editor/EditorHeader';
 import EditorPreview from '../components/editor/EditorPreview';
@@ -100,6 +101,7 @@ export default function PageEditor() {
   
   const [page, setPage] = useState(null);
   const [title, setTitle] = useState('');
+  const [projectName, setProjectName] = useState('');
   const [currentUser, setCurrentUser] = useState(null);
   const [mentionUsers, setMentionUsers] = useState([]);
   const [currentUserRole, setCurrentUserRole] = useState(null);
@@ -149,19 +151,18 @@ export default function PageEditor() {
     };
   }, [toast]);
 
-  // Initialize with timeout fallback
+  // Initialize
   useEffect(() => {
     let isMounted = true;
 
     const init = async () => {
       try {
-        // Set a timeout to prevent infinite loading
         initTimeoutRef.current = setTimeout(() => {
           if (isMounted && isInitializing) {
             console.warn('⚠️ Initialization taking too long, forcing ready state');
             setIsInitializing(false);
           }
-        }, 8000); // 8 second timeout
+        }, 8000);
 
         const { data: { user } } = await supabase.auth.getUser();
         if (!isMounted) return;
@@ -188,6 +189,17 @@ export default function PageEditor() {
         }
 
         setCurrentUser({ ...profile, color: userColor.current });
+
+        // Load project name
+        const { data: projectData } = await supabase
+          .from('projects')
+          .select('name')
+          .eq('id', projectId)
+          .single();
+
+        if (projectData) {
+          setProjectName(projectData.name);
+        }
 
         const { data: pageData, error: pageError } = await supabase
           .from('pages')
@@ -224,6 +236,7 @@ export default function PageEditor() {
 
         setCurrentUserRole(roleData?.role || 'viewer');
 
+        // Load project members with email for mentions
         const { data: members } = await supabase
           .from('project_members')
           .select(`
@@ -242,12 +255,12 @@ export default function PageEditor() {
         const users = members?.map(m => ({
           id: m.profiles.id,
           label: m.profiles.full_name || m.profiles.email,
+          email: m.profiles.email,
           avatar: m.profiles.avatar_url,
         })) || [];
 
         setMentionUsers(users);
 
-        // Load additional data
         await Promise.all([
           loadBreadcrumbs(pageData),
           loadVersionHistory()
@@ -366,7 +379,23 @@ export default function PageEditor() {
   const handleContentUpdate = (content) => {
     if (!hasPermission(currentUserRole, 'canEditPages')) return;
 
+    const oldContent = editorContentRef.current;
     editorContentRef.current = content;
+
+    // Process mention notifications with debounce
+    if (currentUser && mentionUsers.length > 0 && projectName) {
+      debouncedProcessMentionNotifications({
+        oldContent,
+        newContent: content,
+        pageId,
+        pageTitle: title,
+        projectId,
+        projectName,
+        currentUser,
+        mentionUsers,
+        toast,
+      }, 3000); // 3 second debounce
+    }
 
     if (saveTimeoutRef.current) {
       clearTimeout(saveTimeoutRef.current);
@@ -435,7 +464,6 @@ export default function PageEditor() {
         return;
       }
 
-      // Save current version first
       const { data: maxVersion } = await supabase
         .from('page_versions')
         .select('version_number')
@@ -454,12 +482,10 @@ export default function PageEditor() {
         version_number: nextVersionNumber
       });
 
-      // Restore selected version
       const restoredContent = typeof version.content === 'string' 
         ? version.content 
         : (version.content?.content || '');
       
-      // Update database
       await supabase
         .from('pages')
         .update({
@@ -469,7 +495,6 @@ export default function PageEditor() {
         })
         .eq('id', pageId);
       
-      // Update editor
       if (editorRef.current) {
         editorRef.current.commands.setContent(restoredContent);
       }
@@ -478,7 +503,6 @@ export default function PageEditor() {
       editorContentRef.current = restoredContent;
       setShowVersionHistory(false);
       
-      // Reload version history
       await loadVersionHistory();
       
       toast.success('Version restored successfully');
@@ -486,53 +510,6 @@ export default function PageEditor() {
       console.error('Error restoring version:', error);
       toast.error('Failed to restore version');
     }
-  };
-
-  const handleImageUpload = async () => {
-    if (!currentUser) {
-      toast.error("You must be logged in to upload images");
-      return;
-    }
-
-    if (!editorRef.current) {
-      toast.error("Editor not ready");
-      return;
-    }
-    
-    const input = document.createElement('input');
-    input.type = 'file';
-    input.accept = 'image/*';
-    input.onchange = async (e) => {
-      const file = e.target.files[0];
-      if (!file) return;
-
-      try {
-        toast.info('Uploading image...');
-        
-        const fileExt = file.name.split('.').pop();
-        const fileName = `${Date.now()}-${Math.random().toString(36).substring(7)}.${fileExt}`;
-        const filePath = `${pageId}/${fileName}`;
-
-        const { error: uploadError } = await supabase.storage
-          .from('page-images')
-          .upload(filePath, file);
-
-        if (uploadError) throw uploadError;
-
-        const { data: { publicUrl } } = supabase.storage
-          .from('page-images')
-          .getPublicUrl(filePath);
-
-        if (editorRef.current) {
-          editorRef.current.chain().focus().setImage({ src: publicUrl }).run();
-          toast.success('Image uploaded successfully');
-        }
-      } catch (error) {
-        console.error('Image upload failed:', error);
-        toast.error('Failed to upload image');
-      }
-    };
-    input.click();
   };
 
   const handleShare = () => {

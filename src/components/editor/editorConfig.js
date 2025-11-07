@@ -343,6 +343,7 @@ const CustomImage = Image.extend({
 });
 
 const CursorPluginKey = new PluginKey('customCursors');
+
 export const CustomCursors = Extension.create({
   name: 'customCursors',
 
@@ -355,6 +356,8 @@ export const CustomCursors = Extension.create({
 
   addProseMirrorPlugins() {
     const extension = this;
+    let lastBroadcastPosition = -1;
+    let broadcastTimeout = null;
 
     return [
       new Plugin({
@@ -365,19 +368,47 @@ export const CustomCursors = Extension.create({
             return DecorationSet.empty;
           },
           
-          apply(tr, set) {
-            set = set.map(tr.mapping, tr.doc);
-            
-            const decorations = [];
+          apply(tr, oldSet, oldState, newState) {
+            // Map existing decorations through the transaction
+            let set = oldSet.map(tr.mapping, tr.doc);
             
             // Get fresh cursors from extension options
             const cursors = extension.options.cursors || {};
+            const cursorCount = Object.keys(cursors).length;
             
-            console.log('🎨 Rendering cursors:', Object.keys(cursors).length, cursors);
+            console.log('🎨 Rendering cursors:', cursorCount, cursors);
+            
+            // Clear old decorations and rebuild from scratch
+            const decorations = [];
             
             Object.entries(cursors).forEach(([userId, cursor]) => {
-              if (cursor && cursor.position >= 0 && cursor.position <= tr.doc.content.size) {
-                const decoration = Decoration.widget(cursor.position, () => {
+              if (!cursor || typeof cursor.position !== 'number') {
+                console.warn(`⚠️ Invalid cursor data for user ${userId}:`, cursor);
+                return;
+              }
+
+              // Map the cursor position through any document changes
+              let mappedPosition = cursor.position;
+              
+              // If there's a transaction mapping, apply it
+              if (tr.mapping) {
+                try {
+                  mappedPosition = tr.mapping.map(cursor.position);
+                } catch (e) {
+                  // If mapping fails, use original position
+                  console.warn(`⚠️ Failed to map cursor position for ${cursor.name}:`, e);
+                }
+              }
+
+              // Validate mapped position is within document bounds
+              if (mappedPosition < 0 || mappedPosition > newState.doc.content.size) {
+                console.warn(`⚠️ Cursor position ${mappedPosition} out of bounds for ${cursor.name} (doc size: ${newState.doc.content.size})`);
+                // Clamp to valid range
+                mappedPosition = Math.max(0, Math.min(mappedPosition, newState.doc.content.size));
+              }
+
+              try {
+                const decoration = Decoration.widget(mappedPosition, () => {
                   const wrapper = document.createElement('span');
                   wrapper.className = 'collaboration-cursor__caret';
                   wrapper.style.cssText = `
@@ -386,6 +417,8 @@ export const CustomCursors = Extension.create({
                     height: 1.2em;
                     position: relative;
                     display: inline-block;
+                    pointer-events: none;
+                    z-index: 100;
                   `;
 
                   const label = document.createElement('span');
@@ -403,18 +436,25 @@ export const CustomCursors = Extension.create({
                     white-space: nowrap;
                     z-index: 10;
                     pointer-events: none;
+                    box-shadow: 0 2px 8px rgba(0,0,0,0.15);
                   `;
                   label.textContent = cursor.name || 'Unknown';
 
                   wrapper.appendChild(label);
                   return wrapper;
+                }, {
+                  key: `cursor-${userId}`,
+                  side: 1, // Place cursor after the position
                 });
 
                 decorations.push(decoration);
+                console.log(`✅ Rendered cursor for ${cursor.name} at ${mappedPosition}`);
+              } catch (error) {
+                console.error(`❌ Failed to create cursor decoration for ${userId}:`, error);
               }
             });
 
-            return DecorationSet.create(tr.doc, decorations);
+            return DecorationSet.create(newState.doc, decorations);
           },
         },
         
@@ -425,22 +465,31 @@ export const CustomCursors = Extension.create({
         },
         
         view() {
-          let lastPosition = -1;
-          
           return {
             update: (view) => {
               const { from } = view.state.selection;
               
-              // Only broadcast if position actually changed
-              if (from !== lastPosition) {
-                lastPosition = from;
-                // Get fresh onCursorUpdate from extension options
-                const onCursorUpdate = extension.options.onCursorUpdate;
-                if (onCursorUpdate && typeof onCursorUpdate === 'function') {
-                  onCursorUpdate(from);
+              // Throttle cursor broadcasts (max once per 100ms)
+              if (from !== lastBroadcastPosition) {
+                if (broadcastTimeout) {
+                  clearTimeout(broadcastTimeout);
                 }
+                
+                broadcastTimeout = setTimeout(() => {
+                  lastBroadcastPosition = from;
+                  const onCursorUpdate = extension.options.onCursorUpdate;
+                  if (onCursorUpdate && typeof onCursorUpdate === 'function') {
+                    onCursorUpdate(from);
+                  }
+                }, 100);
               }
             },
+            
+            destroy() {
+              if (broadcastTimeout) {
+                clearTimeout(broadcastTimeout);
+              }
+            }
           };
         },
       }),
@@ -448,10 +497,12 @@ export const CustomCursors = Extension.create({
   },
 });
 
-export function getEditorExtensions(yDoc, mentionUsers = [], cursorOptions = {}) {
+// In your editorConfig.js, update the getEditorExtensions function signature:
+
+export function getEditorExtensions(yDoc, mentionUsers = [], currentUser = null) {
   const extensions = [
     StarterKit.configure({
-      history: false,
+      history: false, // Y.js handles history
       codeBlock: false,
       horizontalRule: false,
     }),
@@ -597,23 +648,23 @@ export function getEditorExtensions(yDoc, mentionUsers = [], cursorOptions = {})
         },
       },
     }),
-
-    // Add custom cursors extension
-    CustomCursors.configure(cursorOptions),
   ];
 
-  // Add Y.js Collaboration if yDoc exists
+  // Add Y.js Collaboration with currentUser info
   if (yDoc) {
     extensions.push(
       Collaboration.configure({
         document: yDoc,
       })
     );
+
+    // Note: CollaborationCursor requires a provider, which we're not using
+    // since we're handling collaboration through Supabase Realtime
+    // The cursor/edit tracking is handled through our custom implementation
   }
 
   return extensions;
 }
-
 export const editorProps = {
   attributes: {
     class: 'prose prose-slate max-w-none focus:outline-none px-8 py-6 min-h-[500px]',

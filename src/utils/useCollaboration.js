@@ -1,26 +1,28 @@
-import { useEffect, useState, useRef,useCallback } from 'react';
+import { useEffect, useState, useRef } from 'react';
 import * as Y from 'yjs';
 import { supabase } from '../config/supabaseClient';
 
 export function useCollaboration(pageId, currentUser) {
   const [doc, setDoc] = useState(null);
   const [activeUsers, setActiveUsers] = useState([]);
-  const [cursorPositions, setCursorPositions] = useState({});
+  const [userEdits, setUserEdits] = useState({});
   const [isReady, setIsReady] = useState(false);
   
   const channelRef = useRef(null);
   const docRef = useRef(null);
+  const currentUserIdRef = useRef(null);
+  const editTimeoutsRef = useRef({});
 
   useEffect(() => {
     if (!pageId || !currentUser?.id) return;
 
     let mounted = true;
-    console.log('🔄 useCollaboration effect running for:', currentUser.id);
+    currentUserIdRef.current = currentUser.id;
+    
+    console.log('🔄 Setting up collaboration for:', currentUser.full_name);
 
     const setup = async () => {
       try {
-        console.log('🚀 Setting up collaboration for page:', pageId);
-
         // Create Y.js document
         const yDoc = new Y.Doc();
         docRef.current = yDoc;
@@ -32,7 +34,7 @@ export function useCollaboration(pageId, currentUser) {
               key: currentUser.id,
             },
             broadcast: {
-              self: false,
+              self: false, // Don't receive our own broadcasts
             },
           },
         });
@@ -42,62 +44,78 @@ export function useCollaboration(pageId, currentUser) {
             const state = channel.presenceState();
             const users = Object.values(state)
               .flat()
-              .filter(u => u.id !== currentUser.id);
+              .filter(u => u.id !== currentUserIdRef.current);
+            
+            console.log('👥 Active users:', users.length, users);
             setActiveUsers(users);
-            
-            // Update cursor positions from presence state
-            const cursors = {};
-            users.forEach(user => {
-              if (user.cursor) {
-                cursors[user.id] = {
-                  position: user.cursor,
-                  name: user.name,
-                  color: user.color,
-                };
-              }
-            });
-            setCursorPositions(cursors);
-            
-            console.log('👥 Active users:', users.length);
           })
           .on('presence', { event: 'join' }, ({ newPresences }) => {
-            console.log('✅ User joined:', newPresences[0]?.name);
+            newPresences.forEach(user => {
+              if (user.id !== currentUserIdRef.current) {
+                console.log('✅ User joined:', user.name);
+              }
+            });
           })
           .on('presence', { event: 'leave' }, ({ leftPresences }) => {
-            console.log('👋 User left:', leftPresences[0]?.name);
-            // Remove cursor for user who left
-            const leftUserId = leftPresences[0]?.id;
-            if (leftUserId) {
-              setCursorPositions(prev => {
-                const updated = { ...prev };
-                delete updated[leftUserId];
-                return updated;
-              });
-            }
+            leftPresences.forEach(user => {
+              if (user.id !== currentUserIdRef.current) {
+                console.log('👋 User left:', user.name);
+                // Clear their edit indicator
+                setUserEdits(prev => {
+                  const newEdits = { ...prev };
+                  delete newEdits[user.id];
+                  return newEdits;
+                });
+                if (editTimeoutsRef.current[user.id]) {
+                  clearTimeout(editTimeoutsRef.current[user.id]);
+                  delete editTimeoutsRef.current[user.id];
+                }
+              }
+            });
           })
           .on('broadcast', { event: 'yjs-update' }, ({ payload }) => {
             if (docRef.current && payload.update) {
-              const update = new Uint8Array(payload.update);
-              Y.applyUpdate(docRef.current, update, 'remote');
-              console.log('📨 Applied remote update');
-            }
-          })
-          .on('broadcast', { event: 'cursor-update' }, ({ payload }) => {
-            // Handle cursor updates from other users
-            if (payload.userId !== currentUser.id) {
-              console.log('👆 Received cursor from:', payload.name, 'at position:', payload.position);
-              setCursorPositions(prev => ({
-                ...prev,
-                [payload.userId]: {
-                  position: payload.position,
-                  name: payload.name,
-                  color: payload.color,
-                },
-              }));
+              try {
+                const update = new Uint8Array(payload.update);
+                Y.applyUpdate(docRef.current, update, 'remote');
+                
+                // Show who is editing
+                if (payload.userId && payload.userId !== currentUserIdRef.current) {
+                  console.log('📥 Received update from:', payload.userName);
+                  
+                  setUserEdits(prev => ({
+                    ...prev,
+                    [payload.userId]: {
+                      name: payload.userName,
+                      color: payload.userColor,
+                      timestamp: Date.now(),
+                    }
+                  }));
+
+                  // Clear existing timeout for this user
+                  if (editTimeoutsRef.current[payload.userId]) {
+                    clearTimeout(editTimeoutsRef.current[payload.userId]);
+                  }
+                  
+                  // Set new timeout to clear edit indicator after 3 seconds
+                  editTimeoutsRef.current[payload.userId] = setTimeout(() => {
+                    setUserEdits(prev => {
+                      const newEdits = { ...prev };
+                      delete newEdits[payload.userId];
+                      return newEdits;
+                    });
+                    delete editTimeoutsRef.current[payload.userId];
+                  }, 3000);
+                }
+              } catch (error) {
+                console.error('❌ Error applying update:', error);
+              }
             }
           })
           .subscribe(async (status) => {
             if (status === 'SUBSCRIBED' && mounted) {
+              console.log('✅ Channel subscribed');
+              
               await channel.track({
                 id: currentUser.id,
                 name: currentUser.full_name || currentUser.email,
@@ -113,17 +131,22 @@ export function useCollaboration(pageId, currentUser) {
 
         channelRef.current = channel;
 
-        // Broadcast Y.js updates
+        // Broadcast Y.js updates to other users
         yDoc.on('update', (update, origin) => {
-          if (origin === 'remote') return;
-
-          channel.send({
-            type: 'broadcast',
-            event: 'yjs-update',
-            payload: {
-              update: Array.from(update),
-            },
-          });
+          // Only broadcast local changes (not updates from remote)
+          if (origin !== 'remote' && mounted && channelRef.current) {
+            console.log('📤 Broadcasting local update to other users');
+            channelRef.current.send({
+              type: 'broadcast',
+              event: 'yjs-update',
+              payload: {
+                update: Array.from(update),
+                userId: currentUser.id,
+                userName: currentUser.full_name || currentUser.email,
+                userColor: currentUser.color,
+              },
+            });
+          }
         });
 
         if (mounted) {
@@ -139,39 +162,28 @@ export function useCollaboration(pageId, currentUser) {
 
     return () => {
       mounted = false;
+      currentUserIdRef.current = null;
+      
+      // Clear all edit timeouts
+      Object.values(editTimeoutsRef.current).forEach(timeout => clearTimeout(timeout));
+      editTimeoutsRef.current = {};
+      
       if (channelRef.current) {
+        console.log('🧹 Cleaning up channel');
         supabase.removeChannel(channelRef.current);
       }
       if (docRef.current) {
+        console.log('🧹 Cleaning up Y.js document');
         docRef.current.destroy();
       }
     };
-  }, [pageId, currentUser?.id]); // Only depend on ID, not whole object!
+  }, [pageId, currentUser?.id, currentUser?.full_name, currentUser?.email, currentUser?.color, currentUser?.avatar_url]);
 
-  const broadcastCursor = useCallback((position) => {
-    if (channelRef.current && currentUser) {
-      channelRef.current.send({
-        type: 'broadcast',
-        event: 'cursor-update',
-        payload: {
-          userId: currentUser.id,
-          position,
-          name: currentUser.full_name || currentUser.email,
-          color: currentUser.color,
-        },
-      });
-
-      // Also update presence
-      channelRef.current.track({
-        id: currentUser.id,
-        name: currentUser.full_name || currentUser.email,
-        color: currentUser.color,
-        avatar: currentUser.avatar_url,
-        online_at: new Date().toISOString(),
-        cursor: position,
-      });
-    }
-  }, [currentUser]); // Only recreate when currentUser changes
-
-  return { doc, activeUsers, cursorPositions, isReady, broadcastCursor };
+  return { 
+    doc, 
+    activeUsers, 
+    userEdits,
+    isReady, 
+    channel: channelRef.current
+  };
 }

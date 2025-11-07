@@ -61,3 +61,154 @@
 .collaboration-cursor__selection {
   transition: all 0.1s ease-in-out;
 }
+@keyframes cursorPulse {
+  0%, 100% { 
+    opacity: 1;
+    transform: scale(1);
+  }
+  50% { 
+    opacity: 0.7;
+    transform: scale(1.05);
+  }
+}
+
+.collaboration-cursor__caret {
+  animation: cursorPulse 1.5s ease-in-out infinite;
+  position: relative;
+  z-index: 100;
+}
+
+.collaboration-cursor__label {
+  animation: labelFadeIn 0.3s ease-out;
+  pointer-events: none;
+  user-select: none;
+}
+
+@keyframes labelFadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* Add this to your collaboration-cursor.css file */
+
+/* Base styling for remote changes */
+.ProseMirror .remote-change {
+  position: relative;
+  border-left: 3px solid;
+  padding-left: 6px;
+  margin-left: 3px;
+  border-radius: 2px;
+  transition: all 0.3s ease;
+  animation: highlight-fade-in 0.5s ease-out;
+}
+
+@keyframes highlight-fade-in {
+  from {
+    opacity: 0;
+    transform: translateX(-4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+/* Hover tooltip */
+.ProseMirror .remote-change:hover::before {
+  content: attr(data-user-name) " edited this";
+  position: absolute;
+  bottom: calc(100% + 10px);
+  left: 50%;
+  transform: translateX(-50%);
+  background: rgba(0, 0, 0, 0.9);
+  color: white;
+  padding: 6px 12px;
+  border-radius: 6px;
+  font-size: 11px;
+  font-weight: 500;
+  white-space: nowrap;
+  z-index: 1000;
+  pointer-events: none;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+}
+
+.ProseMirror .remote-change:hover::after {
+  content: '';
+  position: absolute;
+  bottom: calc(100% + 4px);
+  left: 50%;
+  transform: translateX(-50%);
+  border: 5px solid transparent;
+  border-top-color: rgba(0, 0, 0, 0.9);
+  z-index: 1000;
+}
+
+/* Specific styling for different content types */
+.ProseMirror .remote-change.is-paragraph {
+  display: inline;
+}
+
+.ProseMirror .remote-change.is-heading {
+  display: block;
+  padding: 4px 8px;
+  margin: 2px 0;
+}
+
+.ProseMirror .remote-change.is-codeBlock {
+  display: block;
+  border-left-width: 5px;
+  padding-left: 12px;
+  margin: 8px 0;
+}
+
+.ProseMirror .remote-change.is-image {
+  display: inline-block;
+  padding: 8px;
+  border-radius: 8px;
+}
+
+.ProseMirror .remote-change.is-image img {
+  outline: 3px solid;
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
+.ProseMirror .remote-change.is-taskList,
+.ProseMirror .remote-change.is-taskItem {
+  display: block;
+  padding: 4px 8px;
+  margin: 2px 0;
+}
+
+/* Pulse animation for active changes */
+.ProseMirror .remote-change.is-active {
+  animation: highlight-pulse 2s ease-in-out infinite;
+}
+
+@keyframes highlight-pulse {
+  0%, 100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.7;
+  }
+}
+
+/* Fade out animation when change indicator expires */
+.ProseMirror .remote-change.is-fading {
+  animation: fade-out 1s ease-out forwards;
+}
+
+@keyframes fade-out {
+  to {
+    opacity: 0;
+    border-left-color: transparent;
+    background-color: transparent;
+  }
+}

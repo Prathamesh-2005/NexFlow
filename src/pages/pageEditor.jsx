@@ -12,6 +12,7 @@ import EditorPreview from '../components/editor/EditorPreview';
 import VersionHistoryModal from '../components/editor/VersionHistoryModal';
 import Breadcrumbs from '../components/editor/Breadcrumbs';
 import { useToast } from "../components/toast";
+
 import './css/collaboration-cursor.css';
 
 const COLORS = ['#FF6B6B', '#4ECDC4', '#45B7D1', '#FFA07A', '#98D8C8', '#F7DC6F'];
@@ -23,83 +24,66 @@ function CollaborativeEditor({
   canEdit, 
   onUpdate, 
   editorInstance, 
-  cursorPositions, 
-  broadcastCursor,
   initialContent,
-  toast // Added toast prop
+  toast,
+  onRemoteChange,
+  currentUser,
+  onLocalEdit,
 }) {
-  const cursorRef = useRef(cursorPositions);
   const hasSetInitialContent = useRef(false);
   const isEditorReady = useRef(false);
-  const docRef = useRef(doc);
-  const mentionUsersRef = useRef(mentionUsers);
-  const broadcastCursorRef = useRef(broadcastCursor);
+  const lastContentRef = useRef('');
   
-  // Update refs when values change
-  useEffect(() => {
-    cursorRef.current = cursorPositions;
-  }, [cursorPositions]);
-
-  useEffect(() => {
-    docRef.current = doc;
-  }, [doc]);
-
-  useEffect(() => {
-    mentionUsersRef.current = mentionUsers;
-  }, [mentionUsers]);
-
-  useEffect(() => {
-    broadcastCursorRef.current = broadcastCursor;
-  }, [broadcastCursor]);
-
   const editor = useEditor({
-    extensions: getEditorExtensions(doc, mentionUsers, {
-      cursors: cursorRef.current,
-      onCursorUpdate: broadcastCursor,
-    }),
+    extensions: getEditorExtensions(doc, mentionUsers, currentUser),
     editorProps,
     editable: canEdit,
     autofocus: canEdit,
     content: initialContent || '',
     onCreate: ({ editor }) => {
-      console.log('📝 Editor created with content:', editor.getHTML().substring(0, 100));
+      console.log('📝 Editor created');
       isEditorReady.current = true;
+      lastContentRef.current = editor.getHTML();
     },
     onUpdate: ({ editor }) => {
       if (canEdit && isEditorReady.current) {
         const html = editor.getHTML();
-        console.log('📝 Editor updated, content has images:', html.includes('<img'));
+        console.log('📝 Local edit detected');
         onUpdate(html);
+        onLocalEdit?.();
+        lastContentRef.current = html;
       }
     },
-  }, []); // Empty dependency array - only create editor once!
+  }, []);
 
-  // Set initial content when editor is ready - ONLY ONCE
+  // Listen for Y.js document changes (from remote users)
+  useEffect(() => {
+    if (!doc || !editor) return;
+
+    const handleYjsUpdate = () => {
+      const newContent = editor.getHTML();
+      if (newContent !== lastContentRef.current) {
+        console.log('📥 Remote change detected in editor');
+        lastContentRef.current = newContent;
+        onRemoteChange?.();
+      }
+    };
+
+    doc.on('update', handleYjsUpdate);
+
+    return () => {
+      doc.off('update', handleYjsUpdate);
+    };
+  }, [doc, editor, onRemoteChange]);
+
   useEffect(() => {
     if (editor && initialContent && !hasSetInitialContent.current && isEditorReady.current) {
-      console.log('🔄 Setting initial content in editor:', initialContent.substring(0, 100));
+      console.log('🔄 Setting initial content');
       editor.commands.setContent(initialContent);
       hasSetInitialContent.current = true;
+      lastContentRef.current = initialContent;
     }
   }, [editor, initialContent]);
-
-  // Update cursor positions dynamically
-  useEffect(() => {
-    if (!editor) return;
-    
-    console.log('🔄 Updating cursor positions:', Object.keys(cursorPositions).length);
-    
-    const cursorsExt = editor.extensionManager.extensions.find(
-      ext => ext.name === 'customCursors'
-    );
-    
-    if (cursorsExt) {
-      cursorsExt.options.cursors = cursorPositions;
-      cursorsExt.options.onCursorUpdate = broadcastCursorRef.current;
-      const tr = editor.state.tr;
-      editor.view.dispatch(tr);
-    }
-  }, [editor, cursorPositions]);
 
   useEffect(() => {
     if (editor && editorInstance) {
@@ -127,7 +111,7 @@ function CollaborativeEditor({
   return (
     <>
       <EditorToolbar editor={editor} toast={toast} />
-      <div className="flex-1 overflow-y-auto">
+      <div className="flex-1 overflow-y-auto relative">
         <EditorContent editor={editor} />
       </div>
     </>
@@ -154,17 +138,38 @@ export default function PageEditor() {
   const [isOnline, setIsOnline] = useState(navigator.onLine);
   const [isInitializing, setIsInitializing] = useState(true);
   const [initialContent, setInitialContent] = useState('');
+  const [currentUserEditing, setCurrentUserEditing] = useState(false);
   
   const userColor = useRef(getRandomColor());
   const saveTimeoutRef = useRef(null);
   const editorContentRef = useRef('');
   const editorRef = useRef(null);
   const initTimeoutRef = useRef(null);
+  const currentUserEditTimeoutRef = useRef(null);
 
-  const { doc, activeUsers, cursorPositions, isReady: collabReady, broadcastCursor } = useCollaboration(
+  const { doc, activeUsers, userEdits, isReady: collabReady, channel } = useCollaboration(
     pageId,
     currentUser
   );
+
+  // Handle local edits
+  const handleLocalEdit = () => {
+    console.log('✍️ You are editing');
+    setCurrentUserEditing(true);
+    
+    if (currentUserEditTimeoutRef.current) {
+      clearTimeout(currentUserEditTimeoutRef.current);
+    }
+    
+    currentUserEditTimeoutRef.current = setTimeout(() => {
+      setCurrentUserEditing(false);
+    }, 3000);
+  };
+
+  // Handle remote changes
+  const handleRemoteChange = () => {
+    console.log('🌍 Remote user made a change');
+  };
 
   // Online status tracking
   useEffect(() => {
@@ -189,6 +194,9 @@ export default function PageEditor() {
       window.removeEventListener('online', handleOnline);
       window.removeEventListener('offline', handleOffline);
       clearInterval(checkConnection);
+      if (currentUserEditTimeoutRef.current) {
+        clearTimeout(currentUserEditTimeoutRef.current);
+      }
     };
   }, [toast]);
 
@@ -231,7 +239,6 @@ export default function PageEditor() {
 
         setCurrentUser({ ...profile, color: userColor.current });
 
-        // Load project name
         const { data: projectData } = await supabase
           .from('projects')
           .select('name')
@@ -260,13 +267,12 @@ export default function PageEditor() {
         setPage(pageData);
         setTitle(pageData.title || 'Untitled Page');
         
-        // Extract and set initial content
         if (pageData.content) {
           const content = typeof pageData.content === 'string' 
             ? pageData.content 
             : (pageData.content.content || '');
           
-          console.log('📄 Loading initial content:', content.substring(0, 100));
+          console.log('📄 Loading initial content');
           editorContentRef.current = content;
           setInitialContent(content);
         }
@@ -282,7 +288,6 @@ export default function PageEditor() {
 
         setCurrentUserRole(roleData?.role || 'viewer');
 
-        // Load project members with email for mentions
         const { data: members } = await supabase
           .from('project_members')
           .select(`
@@ -428,9 +433,8 @@ export default function PageEditor() {
     const oldContent = editorContentRef.current;
     editorContentRef.current = content;
 
-    console.log('💾 Content updated, has images:', content.includes('<img'));
+    console.log('💾 Content updated locally');
 
-    // Process mention notifications with debounce
     if (currentUser && mentionUsers.length > 0 && projectName) {
       debouncedProcessMentionNotifications({
         oldContent,
@@ -463,7 +467,7 @@ export default function PageEditor() {
         if (error) throw error;
         
         setLastSaved(new Date());
-        console.log('✅ Content saved successfully');
+        console.log('✅ Content saved to database');
       } catch (error) {
         console.error('Save error:', error);
         toast.error('Failed to save changes');
@@ -635,7 +639,41 @@ export default function PageEditor() {
         </div>
       )}
 
-      <div className="flex-1 overflow-hidden flex">
+      {/* Current user editing indicator */}
+      {currentUserEditing && (
+        <div className="bg-blue-50 border-b border-blue-200 px-6 py-2">
+          <div className="flex items-center gap-2">
+            <div className="w-2 h-2 bg-blue-500 rounded-full animate-ping"></div>
+            <p className="text-sm text-blue-800 font-medium">
+              ✍️ You are editing
+            </p>
+          </div>
+        </div>
+      )}
+
+      {/* Other users editing indicators */}
+      {Object.entries(userEdits).map(([userId, edit]) => (
+        <div 
+          key={userId}
+          className="border-b px-6 py-2 animate-fade-in"
+          style={{ 
+            backgroundColor: `${edit.color}10`,
+            borderColor: `${edit.color}40`
+          }}
+        >
+          <div className="flex items-center gap-2">
+            <div 
+              className="w-2 h-2 rounded-full animate-ping" 
+              style={{ backgroundColor: edit.color }}
+            ></div>
+            <p className="text-sm font-medium" style={{ color: edit.color }}>
+              ✨ {edit.name} is editing
+            </p>
+          </div>
+        </div>
+      ))}
+
+      <div className="flex-1 overflow-hidden flex relative">
         <div className={`${showPreview ? 'w-1/2' : 'w-full'} flex flex-col border-r border-gray-200 bg-white transition-all duration-300`}>
           <CollaborativeEditor
             doc={doc}
@@ -643,17 +681,22 @@ export default function PageEditor() {
             canEdit={canEdit}
             onUpdate={handleContentUpdate}
             editorInstance={editorRef}
-            cursorPositions={cursorPositions}
-            broadcastCursor={broadcastCursor}
             initialContent={initialContent}
             toast={toast}
+            onRemoteChange={handleRemoteChange}
+            currentUser={currentUser}
+            onLocalEdit={handleLocalEdit}
           />
         </div>
 
         {showPreview && (
           <EditorPreview 
             title={title} 
-            content={editorContentRef.current} 
+            content={editorContentRef.current}
+            doc={doc}
+            activeUsers={activeUsers}
+            currentUser={currentUser}
+            userEdits={userEdits}
           />
         )}
       </div>

@@ -7,6 +7,7 @@ if (!supabaseUrl || !supabaseAnonKey) {
   throw new Error("Missing Supabase URL or Anon Key");
 }
 
+// Force rebuild - v1.0.1
 export const supabase = createClient(supabaseUrl, supabaseAnonKey);
 
 const projectCache = new Map();

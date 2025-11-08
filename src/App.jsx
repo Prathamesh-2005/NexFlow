@@ -1,8 +1,6 @@
 import React, { useEffect } from 'react';
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { useAuthStore } from './auth/auth';
-
-// Pages
 import Login from './pages/login';
 import Signup from './pages/signup';
 import Dashboard from './pages/Dashboard';

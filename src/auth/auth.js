@@ -50,39 +50,52 @@ export const useAuthStore = create((set, get) => ({
 
   // ✅ Initialize auth only once per app load
   initialize: async () => {
-    const state = get();
-    if (state.initialized) {
-      console.log('🔁 Auth already initialized — skipping re-run');
-      return;
-    }
-
+    const start = performance.now();
+    console.log('🔐 Initializing auth...');
+    
     try {
-      console.log('🚀 Initializing Supabase auth...');
-      const { data: { session }, error: sessionError } = await supabase.auth.getSession();
-      if (sessionError) console.error('Session error:', sessionError);
+      set({ loading: true, initialized: false });
+
+      const { data: { session }, error } = await supabase.auth.getSession();
+      
+      if (error) {
+        console.error('❌ Session error:', error);
+        throw error;
+      }
 
       const user = session?.user || null;
-      const profile = user ? await get().ensureProfileExists(user) : null;
+      
+      if (user) {
+        console.log('✅ User session found:', user.id);
+        
+        // Fetch profile
+        const profile = await get().ensureProfileExists(user);
+        set({ user, profile, loading: false, initialized: true });
+        
+        console.log(`✅ Auth initialized in ${(performance.now() - start).toFixed(2)}ms`);
+      } else {
+        console.log('📭 No active session');
+        set({ user: null, profile: null, loading: false, initialized: true });
+      }
 
-      set({ user, profile, loading: false, initialized: true });
-
-      // ✅ Listen for auth state changes (only once)
+      // Listen for auth state changes
       supabase.auth.onAuthStateChange(async (event, session) => {
-        console.log('Auth state changed:', event);
+        console.log('🔄 Auth state changed:', event);
 
         if (event === 'SIGNED_OUT') {
           set({ user: null, profile: null, loading: false });
           return;
         }
 
-        const newUser = session?.user || null;
-        const profile = newUser ? await get().ensureProfileExists(newUser) : null;
-
-        set({ user: newUser, profile, loading: false });
+        if (event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED') {
+          const newUser = session?.user || null;
+          const profile = newUser ? await get().ensureProfileExists(newUser) : null;
+          set({ user: newUser, profile, loading: false });
+        }
       });
 
     } catch (error) {
-      console.error('Auth initialization error:', error);
+      console.error('❌ Auth initialization error:', error);
       set({ error: error.message, loading: false, initialized: true });
     }
   },
@@ -193,6 +206,7 @@ const { data, error } = await supabase.auth.signUp({
     }
   },
   updateUserProfile: (updatedProfile) => {
+    console.log('🔄 Updating profile in store:', updatedProfile);
     set({ profile: updatedProfile });
   },
 }));

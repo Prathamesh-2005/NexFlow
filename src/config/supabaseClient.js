@@ -9,6 +9,11 @@ if (!supabaseUrl || !supabaseAnonKey) {
 
 export const supabase = createClient(supabaseUrl, supabaseAnonKey);
 
+const projectCache = new Map();
+const userProjectsCache = new Map();
+const projectDetailsCache = new Map();
+const CACHE_DURATION = 60000;
+
 export const supabaseHelpers = {
   async getCurrentUser() {
     const { data: { user }, error } = await supabase.auth.getUser();
@@ -25,15 +30,148 @@ export const supabaseHelpers = {
     return null;
   },
 
+  async getUserProjects(userId) {
+    const cached = userProjectsCache.get(userId);
+    if (cached && Date.now() - cached.timestamp < CACHE_DURATION) {
+      return cached.data;
+    }
+
+    try {
+      const { data, error } = await supabase
+        .from('project_members')
+        .select(`
+          role,
+          joined_at,
+          projects!inner (
+            id,
+            name,
+            description,
+            icon,
+            color,
+            created_at
+          )
+        `)
+        .eq('user_id', userId)
+        .order('joined_at', { ascending: false });
+
+      if (error) {
+        throw error;
+      }
+
+      if (!data || data.length === 0) {
+        return [];
+      }
+
+      const projects = data.map(member => ({
+        ...member.projects,
+        userRole: member.role,
+        memberSince: member.joined_at
+      }));
+
+      userProjectsCache.set(userId, {
+        data: projects,
+        timestamp: Date.now()
+      });
+      
+      return projects;
+    } catch (error) {
+      throw error;
+    }
+  },
+
+  async deleteProject(projectId) {
+    try {
+      const { data: pages } = await supabase
+        .from('pages')
+        .select('id')
+        .eq('project_id', projectId);
+      
+      const pageIds = pages?.map(p => p.id) || [];
+      
+      const { data: boards } = await supabase
+        .from('boards')
+        .select('id')
+        .eq('project_id', projectId);
+      
+      const boardIds = boards?.map(b => b.id) || [];
+
+      await supabase.from('activities').delete().eq('project_id', projectId);
+      
+      if (pageIds.length > 0) {
+        await supabase.from('page_presence').delete().in('page_id', pageIds);
+        await supabase.from('page_versions').delete().in('page_id', pageIds);
+        await supabase.from('comments').delete().in('page_id', pageIds);
+        await supabase.from('mentions').delete().in('page_id', pageIds);
+      }
+      
+      await supabase.from('pages').delete().eq('project_id', projectId);
+      
+      if (boardIds.length > 0) {
+        const { data: cards } = await supabase
+          .from('cards')
+          .select('id')
+          .in('board_id', boardIds);
+        
+        const cardIds = cards?.map(c => c.id) || [];
+        
+        if (cardIds.length > 0) {
+          await supabase.from('card_labels').delete().in('card_id', cardIds);
+          await supabase.from('mentions').delete().in('card_id', cardIds);
+        }
+        
+        await supabase.from('cards').delete().in('board_id', boardIds);
+        await supabase.from('board_columns').delete().in('board_id', boardIds);
+      }
+      
+      await supabase.from('boards').delete().eq('project_id', projectId);
+      await supabase.from('labels').delete().eq('project_id', projectId);
+      await supabase.from('notifications').delete().eq('link', `%/project/${projectId}%`);
+      await supabase.from('project_members').delete().eq('project_id', projectId);
+      
+      const { error } = await supabase
+        .from('projects')
+        .delete()
+        .eq('id', projectId);
+      
+      if (error) throw error;
+
+      this.clearProjectDetailsCache(projectId);
+      this.clearUserProjectsCache();
+      projectCache.delete(projectId);
+      
+    } catch (error) {
+      throw new Error(error.message || 'Failed to delete project');
+    }
+  },
+
   async getProjectDetails(projectId) {
-    const { data, error } = await supabase
-      .from('projects')
-      .select('id, name, description, icon, color, created_at, created_by')
-      .eq('id', projectId)
-      .single();
-    
-    if (error) throw error;
-    return data;
+    try {
+      const { data, error } = await supabase
+        .from('projects')
+        .select(`
+          id,
+          name,
+          description,
+          icon,
+          color,
+          created_at,
+          created_by,
+          pages (
+            id,
+            title,
+            emoji,
+            updated_at
+          )
+        `)
+        .eq('id', projectId)
+        .single();
+
+      if (error) throw error;
+      
+      return data;
+    } catch (error) {
+      throw error;
+    }
   },
 
   async updatePageContent(pageId, content) {
@@ -46,31 +184,6 @@ export const supabaseHelpers = {
     
     if (error) throw error;
     return data;
-  },
-
-  async getUserProjects(userId) {
-    const { data, error } = await supabase
-      .from('project_members')
-      .select(`
-        role,
-        joined_at,
-        projects (
-          id,
-          name,
-          description,
-          icon,
-          color,
-          created_at
-        )
-      `)
-      .eq('user_id', userId)
-      .order('joined_at', { ascending: false });
-    
-    if (error) throw error;
-    return data.map(item => ({
-      ...item.projects,
-      userRole: item.role
-    }));
   },
 
   async checkPermission(userId, projectId, requiredRole) {
@@ -251,86 +364,142 @@ export const supabaseHelpers = {
     return channel;
   },
 
-  //  deleteProject: async (projectId) => {
-  //   const { error } = await supabase
-  //     .from('projects')
-  //     .delete()
-  //     .eq('id', projectId);
+  async updateProfile(userId, updates) {
+    try {
+      const { data, error } = await supabase
+        .from('profiles')
+        .update({
+          full_name: updates.full_name,
+          avatar_url: updates.avatar_url,
+          updated_at: new Date().toISOString()
+        })
+        .eq('id', userId)
+        .select()
+        .single();
 
-  //   if (error) throw error;
-  //   return true;
-  // },
+      if (error) {
+        throw error;
+      }
 
-  updateProfile: async (userId, updates) => {
-    const { data, error } = await supabase
-      .from('profiles')
-      .update(updates)
-      .eq('id', userId)
-      .select()
-      .single();
-
-    if (error) throw error;
-    return data;
+      return data;
+    } catch (error) {
+      throw error;
+    }
   },
-  async deleteProject(projectId) {
-  try {
-    // First, delete all related records in the correct order
-    
-    // 1. Delete activities (has foreign key to project_id)
-    const { error: activitiesError } = await supabase
-      .from('activities')
-      .delete()
-      .eq('project_id', projectId);
-    
-    if (activitiesError) throw activitiesError;
 
-    // 2. Delete cards (if they have foreign key to pages)
-    const { data: pages } = await supabase
-      .from('pages')
-      .select('id')
-      .eq('project_id', projectId);
-    
-    if (pages && pages.length > 0) {
-      const pageIds = pages.map(p => p.id);
-      
-      const { error: cardsError } = await supabase
-        .from('cards')
-        .delete()
-        .in('linked_page_id', pageIds);
-      
-      if (cardsError) throw cardsError;
+  async getProjectWithPages(projectId, userId) {
+    const cacheKey = `${projectId}_${userId}`;
+    const cached = projectDetailsCache.get(cacheKey);
+    if (cached && Date.now() - cached.timestamp < CACHE_DURATION) {
+      return cached.data;
     }
 
-    // 3. Delete pages
-    const { error: pagesError } = await supabase
-      .from('pages')
-      .delete()
-      .eq('project_id', projectId);
-    
-    if (pagesError) throw pagesError;
+    try {
+      const [projectResult, pagesResult, memberResult] = await Promise.all([
+        supabase
+          .from('projects')
+          .select('id, name, description, icon, color, created_at, created_by')
+          .eq('id', projectId)
+          .single(),
+        
+        supabase
+          .from('pages')
+          .select('id, title, emoji, updated_at, parent_id, created_by')
+          .eq('project_id', projectId)
+          .order('updated_at', { ascending: false }),
+        
+        supabase
+          .from('project_members')
+          .select('role')
+          .eq('project_id', projectId)
+          .eq('user_id', userId)
+          .single()
+      ]);
 
-    // 4. Delete project members
-    const { error: membersError } = await supabase
-      .from('project_members')
-      .delete()
-      .eq('project_id', projectId);
-    
-    if (membersError) throw membersError;
+      if (projectResult.error) throw projectResult.error;
+      if (memberResult.error) throw memberResult.error;
 
-    // 5. Finally, delete the project itself
-    const { error: projectError } = await supabase
-      .from('projects')
-      .delete()
-      .eq('id', projectId);
-    
-    if (projectError) throw projectError;
+      const data = {
+        ...projectResult.data,
+        pages: pagesResult.data || [],
+        userRole: memberResult.data?.role || 'viewer'
+      };
 
-    return { success: true };
-  } catch (error) {
-    console.error('Error in deleteProject:', error);
-    throw new Error(error.message || 'Failed to delete project');
-  }
-}
+      projectDetailsCache.set(cacheKey, {
+        data,
+        timestamp: Date.now()
+      });
+
+      return data;
+    } catch (error) {
+      throw error;
+    }
+  },
+
+  async getRecentActivities(projectId, limit = 20) {
+    try {
+      const { data, error } = await supabase
+        .from('activities')
+        .select(`
+          id,
+          activity_type,
+          metadata,
+          created_at,
+          user:profiles!activities_user_id_fkey (
+            id,
+            full_name,
+            avatar_url
+          ),
+          page:pages (
+            id,
+            title
+          )
+        `)
+        .eq('project_id', projectId)
+        .order('created_at', { ascending: false })
+        .limit(limit);
+
+      if (error) throw error;
+
+      return data || [];
+    } catch (error) {
+      return [];
+    }
+  },
+
+  clearProjectDetailsCache(projectId) {
+    if (projectId) {
+      for (const key of projectDetailsCache.keys()) {
+        if (key.startsWith(`${projectId}_`)) {
+          projectDetailsCache.delete(key);
+        }
+      }
+    } else {
+      projectDetailsCache.clear();
+    }
+  },
+
+  clearAllCaches() {
+    projectCache.clear();
+    userProjectsCache.clear();
+    projectDetailsCache.clear();
+  },
+
+  clearUserProjectsCache(userId = null) {
+    if (userId) {
+      userProjectsCache.delete(userId);
+    } else {
+      userProjectsCache.clear();
+    }
+  },
+
+  clearProjectCache(projectId) {
+    if (projectId) {
+      projectCache.delete(projectId);
+    } else {
+      projectCache.clear();
+    }
+  },
 };
 
 export default supabase;

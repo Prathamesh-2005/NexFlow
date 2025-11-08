@@ -7,22 +7,21 @@ import { useToast } from '../components/toast';
 import ProfileSettings from '../components/ProfileSettings';
 import './css/collaboration-cursor.css';
 import { 
+  LogOut, 
   Plus, 
-  FolderOpen, 
-  Clock, 
-  LogOut,
+  Grid3x3, 
+  List, 
   Search,
   Filter,
-  Grid,
-  List,
-  MoreVertical,
-  Trash2,
+  User, 
   ChevronDown,
-  User,
-  Settings,
-  Bell,
-  Star,
-  ArrowRight
+  Grid,
+  MoreVertical,  
+  Trash2,        
+  Clock,         
+  ArrowRight,    
+  FolderOpen,
+  AlertCircle,
 } from 'lucide-react';
 
 function getRoleBadgeColor(role) {
@@ -37,10 +36,11 @@ function getRoleBadgeColor(role) {
 
 export default function Dashboard() {
   const navigate = useNavigate();
-  const { profile, signOut } = useAuthStore();
+  const { profile, signOut, loading: authLoading } = useAuthStore();
   const toast = useToast();
   const [projects, setProjects] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [viewMode, setViewMode] = useState('grid');
   const [filterRole, setFilterRole] = useState('all');
@@ -48,13 +48,16 @@ export default function Dashboard() {
   const [showUserMenu, setShowUserMenu] = useState(false);
   const [showProfileSettings, setShowProfileSettings] = useState(false);
   const [deleteConfirm, setDeleteConfirm] = useState(null);
+  const [avatarError, setAvatarError] = useState(false);
   const userMenuRef = useRef(null);
+  const hasLoadedRef = useRef(false);
 
   useEffect(() => {
-    if (profile?.id) {
+    if (profile?.id && !hasLoadedRef.current) {
+      hasLoadedRef.current = true;
       loadProjects();
     }
-  }, [profile]); 
+  }, [profile?.id]);
 
   useEffect(() => {
     function handleClickOutside(event) {
@@ -66,31 +69,61 @@ export default function Dashboard() {
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, []);
 
+  useEffect(() => {
+    setAvatarError(false);
+  }, [profile?.avatar_url]);
+
   const loadProjects = async () => {
     try {
       setLoading(true);
+      setError(null);
+      
+      console.log('📂 Loading projects for user:', profile.id);
+      const startTime = performance.now();
+      
       const data = await supabaseHelpers.getUserProjects(profile.id);
-      setProjects(data);
+      
+      const endTime = performance.now();
+      console.log(`✅ Projects loaded in ${(endTime - startTime).toFixed(2)}ms`);
+      
+      setProjects(data || []);
     } catch (error) {
-      console.error('Error loading projects:', error);
+      console.error('❌ Error loading projects:', error);
+      setError(error.message);
       toast.error('Failed to load projects');
     } finally {
       setLoading(false);
     }
   };
 
-  const handleDeleteProject = async (projectId) => {
+  const handleDeleteProject = async (project) => {
+    // Check if user has permission to delete
+    const canDelete = hasPermission(project.userRole, 'canDeleteProject');
+    
+    if (!canDelete) {
+      toast.error(`Only project owners can delete projects. Your role: ${project.userRole}`);
+      return;
+    }
+
     try {
-      setLoading(true);
-      await supabaseHelpers.deleteProject(projectId);
+      // Optimistically remove from UI immediately
+      setProjects(prev => prev.filter(p => p.id !== project.id));
       setDeleteConfirm(null);
+      
+      // Show immediate feedback
+      toast.success('Deleting project...');
+      
+      // Delete from database in the background
+      await supabaseHelpers.deleteProject(project.id);
+      
+      // Update success message
       toast.success('Project deleted successfully');
-      await loadProjects();
     } catch (error) {
       console.error('Error deleting project:', error);
+      
+      // If delete failed, reload projects to restore UI
       toast.error(error.message || 'Failed to delete project');
-    } finally {
-      setLoading(false);
+      loadProjects();
     }
   };
 
@@ -100,74 +133,125 @@ export default function Dashboard() {
     return matchesSearch && matchesRole;
   });
 
+  if (authLoading) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-gray-50">
+        <div className="text-center">
+          <div className="w-12 h-12 border-4 border-gray-900 border-t-transparent rounded-full animate-spin mx-auto mb-4"></div>
+          <p className="text-gray-600">Authenticating...</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (!profile?.id) {
+    navigate('/login', { replace: true });
+    return null;
+  }
+
+  if (error) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-gray-50">
+        <div className="text-center max-w-md">
+          <div className="w-16 h-16 bg-red-100 rounded-full flex items-center justify-center mx-auto mb-4">
+            <svg className="w-8 h-8 text-red-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+            </svg>
+          </div>
+          <h2 className="text-xl font-bold text-gray-900 mb-2">Failed to Load Dashboard</h2>
+          <p className="text-gray-600 mb-6">{error}</p>
+          <div className="flex gap-3 justify-center">
+            <button
+              onClick={() => {
+                setError(null);
+                hasLoadedRef.current = false;
+                loadProjects();
+              }}
+              className="px-4 py-2 bg-gray-900 text-white rounded-lg hover:bg-gray-800 transition"
+            >
+              Try Again
+            </button>
+            <button
+              onClick={() => navigate('/login')}
+              className="px-4 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition"
+            >
+              Back to Login
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="min-h-screen bg-white">
-      {/* Top Navigation */}
-      <nav className="sticky top-0 z-40 bg-white border-b border-gray-200">
-        <div className="max-w-7xl mx-auto px-6 lg:px-8">
-          <div className="flex justify-between items-center h-16">
-            {/* Logo Section */}
+      <header className="sticky top-0 z-40 bg-white border-b border-gray-200 shadow-sm">
+        <div className="max-w-7xl mx-auto px-6 py-4">
+          <div className="flex items-center justify-between">
             <div className="flex items-center gap-3">
-              <img 
-                src="/logo.png" 
-                alt="NexFlow Logo" 
-                className="h-9 w-9 rounded-lg object-cover"
-              />
-              <div className="hidden sm:block">
-                <h1 className="text-lg font-bold text-gray-900">NexFlow</h1>
+              <div className="w-10 h-10 bg-gradient-to-br from-gray-900 to-gray-700 rounded-xl flex items-center justify-center shadow-lg">
+                <span className="text-white text-xl font-bold">N</span>
+              </div>
+              <div>
+                <h1 className="text-xl font-bold text-gray-900">NexFlow</h1>
                 <p className="text-xs text-gray-500">Collaborative Workspace</p>
               </div>
             </div>
 
-            {/* Right Actions */}
-            <div className="flex items-center gap-2">
-              {/* Notifications */}
-              <button className="p-2 hover:bg-gray-100 rounded-lg transition-colors relative">
-                <Bell className="w-5 h-5 text-gray-600" />
-                <span className="absolute top-1.5 right-1.5 w-2 h-2 bg-red-500 rounded-full"></span>
-              </button>
-
-              {/* Settings */}
-              <button className="p-2 hover:bg-gray-100 rounded-lg transition-colors">
-                <Settings className="w-5 h-5 text-gray-600" />
-              </button>
-
-              {/* User Menu */}
-              <div className="relative ml-2" ref={userMenuRef}>
+            <div className="flex items-center gap-3">
+              <div className="relative" ref={userMenuRef}>
                 <button
                   onClick={() => setShowUserMenu(!showUserMenu)}
                   className="flex items-center gap-3 px-3 py-2 hover:bg-gray-50 rounded-lg transition-all"
                 >
-                  <div className="w-8 h-8 bg-gray-900 rounded-full flex items-center justify-center">
-                    <span className="text-white text-sm font-semibold">
-                      {profile?.full_name?.charAt(0).toUpperCase() || 'U'}
-                    </span>
-                  </div>
-                  <div className="text-left hidden md:block">
-                    <p className="text-sm font-medium text-gray-900">
+                  {profile?.avatar_url && !avatarError ? (
+                    <img
+                      src={profile.avatar_url}
+                      alt={profile.full_name}
+                      onError={() => setAvatarError(true)}
+                      className="w-9 h-9 rounded-full object-cover ring-2 ring-gray-200"
+                    />
+                  ) : (
+                    <div className="w-9 h-9 bg-gradient-to-br from-gray-900 to-gray-700 rounded-full flex items-center justify-center ring-2 ring-gray-200">
+                      <span className="text-white text-sm font-semibold">
+                        {profile?.full_name?.charAt(0).toUpperCase() || 'U'}
+                      </span>
+                    </div>
+                  )}
+                  
+                  <div className="text-left hidden sm:block">
+                    <p className="text-sm font-semibold text-gray-900">
                       {profile?.full_name || 'User'}
                     </p>
-                    <p className="text-xs text-gray-500 truncate max-w-[120px]">
+                    <p className="text-xs text-gray-500 truncate max-w-[150px]">
                       {profile?.email}
                     </p>
                   </div>
-                  <ChevronDown className={`w-4 h-4 text-gray-500 transition-transform hidden md:block ${showUserMenu ? 'rotate-180' : ''}`} />
+                  
+                  <ChevronDown className={`w-4 h-4 text-gray-600 transition-transform ${showUserMenu ? 'rotate-180' : ''}`} />
                 </button>
 
-                {/* User Dropdown Menu */}
                 {showUserMenu && (
-                  <div className="absolute right-0 mt-2 w-64 bg-white rounded-xl shadow-lg border border-gray-200 overflow-hidden">
-                    {/* User Info Header */}
-                    <div className="px-4 py-3 border-b border-gray-100 bg-gray-50">
+                  <div className="absolute right-0 mt-2 w-64 bg-white rounded-lg shadow-xl border border-gray-200 py-2 z-50">
+                    <div className="px-4 py-3 border-b border-gray-100">
                       <div className="flex items-center gap-3">
-                        <div className="w-10 h-10 bg-gray-900 rounded-full flex items-center justify-center">
-                          <span className="text-white font-bold">
-                            {profile?.full_name?.charAt(0).toUpperCase() || 'U'}
-                          </span>
-                        </div>
+                        {profile?.avatar_url && !avatarError ? (
+                          <img
+                            src={profile.avatar_url}
+                            alt={profile.full_name}
+                            className="w-12 h-12 rounded-full object-cover ring-2 ring-gray-200"
+                            onError={() => setAvatarError(true)}
+                          />
+                        ) : (
+                          <div className="w-12 h-12 bg-gradient-to-br from-gray-900 to-gray-700 rounded-full flex items-center justify-center ring-2 ring-gray-200">
+                            <span className="text-white text-lg font-semibold">
+                              {profile?.full_name?.charAt(0).toUpperCase() || 'U'}
+                            </span>
+                          </div>
+                        )}
                         <div className="flex-1 min-w-0">
-                          <p className="text-sm font-semibold text-gray-900 truncate">
-                            {profile?.full_name || 'User'}
+                          <p className="font-semibold text-gray-900 truncate">
+                            {profile?.full_name}
                           </p>
                           <p className="text-xs text-gray-500 truncate">
                             {profile?.email}
@@ -175,41 +259,39 @@ export default function Dashboard() {
                         </div>
                       </div>
                     </div>
-                    
-                    {/* Menu Items */}
-                    <div className="py-2">
-                      <button 
-                        onClick={() => {
-                          setShowUserMenu(false);
-                          setShowProfileSettings(true);
-                        }}
-                        className="w-full px-4 py-2.5 text-left text-sm text-gray-700 hover:bg-gray-50 flex items-center gap-3 transition-colors"
-                      >
-                        <User className="w-4 h-4 text-gray-500" />
-                        <span>Profile Settings</span>
-                      </button>
 
-                      <div className="my-1 border-t border-gray-100"></div>
-                      
-                      <button
-                        onClick={signOut}
-                        className="w-full px-4 py-2.5 text-left text-sm text-red-600 hover:bg-red-50 flex items-center gap-3 transition-colors"
-                      >
-                        <LogOut className="w-4 h-4" />
-                        <span>Sign Out</span>
-                      </button>
-                    </div>
+                    <button
+                      onClick={() => {
+                        setShowProfileSettings(true);
+                        setShowUserMenu(false);
+                      }}
+                      className="w-full px-4 py-2.5 text-left hover:bg-gray-50 transition-colors flex items-center gap-3 text-sm text-gray-700"
+                    >
+                      <User className="w-4 h-4" />
+                      Profile Settings
+                    </button>
+
+                    <div className="border-t border-gray-100 my-1"></div>
+
+                    <button
+                      onClick={async () => {
+                        await signOut();
+                        navigate('/login');
+                      }}
+                      className="w-full px-4 py-2.5 text-left hover:bg-red-50 transition-colors flex items-center gap-3 text-sm text-red-600"
+                    >
+                      <LogOut className="w-4 h-4" />
+                      Sign Out
+                    </button>
                   </div>
                 )}
               </div>
             </div>
           </div>
         </div>
-      </nav>
+      </header>
 
-      {/* Main Content */}
       <main className="max-w-7xl mx-auto px-6 lg:px-8 py-8">
-        {/* Header Section */}
         <div className="mb-8">
           <div className="flex items-center justify-between mb-6">
             <div>
@@ -227,10 +309,8 @@ export default function Dashboard() {
             </button>
           </div>
 
-          {/* Search and Filters Bar */}
           <div className="bg-gray-50 rounded-xl p-4 border border-gray-200">
             <div className="flex flex-col sm:flex-row gap-3">
-              {/* Search */}
               <div className="relative flex-1">
                 <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
                 <input
@@ -242,7 +322,6 @@ export default function Dashboard() {
                 />
               </div>
 
-              {/* Filter Dropdown */}
               <div className="relative">
                 <Filter className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400 pointer-events-none" />
                 <select
@@ -258,7 +337,6 @@ export default function Dashboard() {
                 </select>
               </div>
 
-              {/* View Mode Toggle */}
               <div className="flex bg-white rounded-lg border border-gray-300 p-1">
                 <button
                   onClick={() => setViewMode('grid')}
@@ -277,7 +355,6 @@ export default function Dashboard() {
           </div>
         </div>
 
-        {/* Projects Grid/List */}
         {loading ? (
           <div className="flex items-center justify-center py-20">
             <div className="text-center">
@@ -313,7 +390,14 @@ export default function Dashboard() {
                 key={project.id} 
                 project={project} 
                 navigate={navigate}
-                onDelete={(project) => setDeleteConfirm(project)}
+                onDelete={(project) => {
+                  const canDelete = hasPermission(project.userRole, 'canDeleteProject');
+                  if (!canDelete) {
+                    toast.error(`Only project owners can delete projects. Your role: ${project.userRole}`);
+                    return;
+                  }
+                  setDeleteConfirm(project);
+                }}
               />
             ))}
           </div>
@@ -325,20 +409,26 @@ export default function Dashboard() {
                 project={project}
                 navigate={navigate}
                 isLast={index === filteredProjects.length - 1}
-                onDelete={(project) => setDeleteConfirm(project)}
+                onDelete={(project) => {
+                  const canDelete = hasPermission(project.userRole, 'canDeleteProject');
+                  if (!canDelete) {
+                    toast.error(`Only project owners can delete projects. Your role: ${project.userRole}`);
+                    return;
+                  }
+                  setDeleteConfirm(project);
+                }}
               />
             ))}
           </div>
         )}
       </main>
 
-      {/* Modals */}
       {showCreateModal && (
         <CreateProjectModal
           onClose={() => setShowCreateModal(false)}
-          onSuccess={() => {
+          onSuccess={(newProject) => {
+            setProjects(prev => [newProject, ...prev]);
             setShowCreateModal(false);
-            loadProjects();
           }}
         />
       )}
@@ -351,7 +441,7 @@ export default function Dashboard() {
         <DeleteConfirmModal
           project={deleteConfirm}
           onClose={() => setDeleteConfirm(null)}
-          onConfirm={() => handleDeleteProject(deleteConfirm.id)}
+          onConfirm={() => handleDeleteProject(deleteConfirm)}
           loading={loading}
         />
       )}
@@ -385,7 +475,6 @@ function ProjectCard({ project, navigate, onDelete }) {
       onClick={() => navigate(`/project/${project.id}`)}
       className="group bg-white rounded-xl border border-gray-200 p-5 hover:shadow-lg hover:border-gray-300 transition-all duration-300 cursor-pointer relative"
     >
-      {/* Project Icon & Menu */}
       <div className="flex items-start justify-between mb-4">
         <div
           className="w-12 h-12 rounded-lg flex items-center justify-center text-2xl shadow-sm"
@@ -405,7 +494,7 @@ function ProjectCard({ project, navigate, onDelete }) {
             <MoreVertical className="w-4 h-4 text-gray-600" />
           </button>
 
-          {showMenu && canDelete && (
+          {showMenu && (
             <div className="absolute right-0 mt-1 w-44 bg-white rounded-lg shadow-lg border border-gray-200 overflow-hidden z-10">
               <button
                 onClick={(e) => {
@@ -413,17 +502,22 @@ function ProjectCard({ project, navigate, onDelete }) {
                   setShowMenu(false);
                   onDelete(project);
                 }}
-                className="w-full px-3 py-2 text-left text-sm text-red-600 hover:bg-red-50 flex items-center gap-2 transition-colors"
+                className={`w-full px-3 py-2 text-left text-sm flex items-center gap-2 transition-colors ${
+                  canDelete 
+                    ? 'text-red-600 hover:bg-red-50' 
+                    : 'text-gray-400 cursor-not-allowed bg-gray-50'
+                }`}
+                disabled={!canDelete}
               >
                 <Trash2 className="w-4 h-4" />
-                Delete Project
+                <span>Delete Project</span>
+                {!canDelete && <AlertCircle className="w-3 h-3 ml-auto" />}
               </button>
             </div>
           )}
         </div>
       </div>
 
-      {/* Project Info */}
       <div className="mb-4">
         <h3 className="text-base font-semibold text-gray-900 mb-1 truncate">
           {project.name}
@@ -433,7 +527,6 @@ function ProjectCard({ project, navigate, onDelete }) {
         </p>
       </div>
 
-      {/* Footer */}
       <div className="flex items-center justify-between pt-4 border-t border-gray-100">
         <span className={`px-2.5 py-1 rounded-md text-xs font-medium ${getRoleBadgeColor(project.userRole)}`}>
           {project.userRole}
@@ -444,7 +537,6 @@ function ProjectCard({ project, navigate, onDelete }) {
         </div>
       </div>
 
-      {/* Hover Arrow */}
       <div className={`absolute bottom-5 right-5 transition-all duration-300 ${isHovered ? 'opacity-100 translate-x-0' : 'opacity-0 translate-x-2'}`}>
         <ArrowRight className="w-4 h-4 text-gray-400" />
       </div>
@@ -508,7 +600,7 @@ function ProjectListItem({ project, navigate, isLast, onDelete }) {
           <MoreVertical className="w-4 h-4 text-gray-600" />
         </button>
 
-        {showMenu && canDelete && (
+        {showMenu && (
           <div className="absolute right-0 mt-1 w-44 bg-white rounded-lg shadow-lg border border-gray-200 overflow-hidden z-10">
             <button
               onClick={(e) => {
@@ -516,10 +608,16 @@ function ProjectListItem({ project, navigate, isLast, onDelete }) {
                 setShowMenu(false);
                 onDelete(project);
               }}
-              className="w-full px-3 py-2 text-left text-sm text-red-600 hover:bg-red-50 flex items-center gap-2 transition-colors"
+              className={`w-full px-3 py-2 text-left text-sm flex items-center gap-2 transition-colors ${
+                canDelete 
+                  ? 'text-red-600 hover:bg-red-50' 
+                  : 'text-gray-400 cursor-not-allowed bg-gray-50'
+              }`}
+              disabled={!canDelete}
             >
               <Trash2 className="w-4 h-4" />
-              Delete Project
+              <span>Delete Project</span>
+              {!canDelete && <AlertCircle className="w-3 h-3 ml-auto" />}
             </button>
           </div>
         )}
@@ -554,9 +652,18 @@ function CreateProjectModal({ onClose, onSuccess }) {
     setLoading(true);
 
     try {
-      await supabaseHelpers.createProject(profile.id, formData);
+      const result = await supabaseHelpers.createProject(profile.id, formData);
+      
+      const newProject = {
+        ...result,
+        ...formData,
+        userRole: 'owner',
+        owner_id: profile.id,
+        created_at: result.created_at || new Date().toISOString()
+      };
+      
       toast.success('Project created successfully');
-      onSuccess();
+      onSuccess(newProject);
     } catch (error) {
       console.error('Error creating project:', error);
       toast.error('Failed to create project');
@@ -672,6 +779,8 @@ function CreateProjectModal({ onClose, onSuccess }) {
 }
 
 function DeleteConfirmModal({ project, onClose, onConfirm, loading }) {
+  const canDelete = hasPermission(project.userRole, 'canDeleteProject');
+
   return (
     <div
       onClick={onClose}
@@ -681,59 +790,104 @@ function DeleteConfirmModal({ project, onClose, onConfirm, loading }) {
         onClick={(e) => e.stopPropagation()}
         className="bg-white rounded-xl shadow-xl max-w-md w-full p-6"
       >
-        <div className="flex items-center gap-3 mb-4">
-          <div className="w-11 h-11 bg-red-50 rounded-full flex items-center justify-center">
-            <Trash2 className="w-5 h-5 text-red-600" />
-          </div>
-          <div>
-            <h2 className="text-xl font-bold text-gray-900">Delete Project</h2>
-            <p className="text-sm text-gray-500">This action cannot be undone</p>
-          </div>
-        </div>
+        {canDelete ? (
+          <>
+            <div className="flex items-center gap-3 mb-4">
+              <div className="w-11 h-11 bg-red-50 rounded-full flex items-center justify-center">
+                <Trash2 className="w-5 h-5 text-red-600" />
+              </div>
+              <div>
+                <h2 className="text-xl font-bold text-gray-900">Delete Project</h2>
+                <p className="text-sm text-gray-500">This action cannot be undone</p>
+              </div>
+            </div>
 
-        <div className="mb-6">
-          <p className="text-gray-700 mb-4">
-            Are you sure you want to delete <strong className="text-gray-900">{project.name}</strong>?
-          </p>
-          <div className="bg-red-50 border border-red-200 rounded-lg p-3">
-            <p className="text-sm text-red-800 font-medium mb-2">
-              ⚠️ This will permanently delete:
-            </p>
-            <ul className="text-sm text-red-700 ml-4 space-y-1">
-              <li>• All pages and content</li>
-              <li>• All cards and tasks</li>
-              <li>• All project data and history</li>
-            </ul>
-          </div>
-        </div>
+            <div className="mb-6">
+              <p className="text-gray-700 mb-4">
+                Are you sure you want to delete <strong className="text-gray-900">{project.name}</strong>?
+              </p>
+              <div className="bg-red-50 border border-red-200 rounded-lg p-3">
+                <p className="text-sm text-red-800 font-medium mb-2">
+                  ⚠️ This will permanently delete:
+                </p>
+                <ul className="text-sm text-red-700 ml-4 space-y-1">
+                  <li>• All pages and content</li>
+                  <li>• All cards and tasks</li>
+                  <li>• All project data and history</li>
+                </ul>
+              </div>
+            </div>
 
-        <div className="flex gap-3">
-          <button
-            type="button"
-            onClick={onClose}
-            disabled={loading}
-            className="flex-1 px-4 py-2.5 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition-colors disabled:opacity-50 font-medium"
-          >
-            Cancel
-          </button>
-          <button
-            onClick={onConfirm}
-            disabled={loading}
-            className="flex-1 px-4 py-2.5 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors disabled:opacity-50 flex items-center justify-center gap-2 font-medium"
-          >
-            {loading ? (
-              <>
-                <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
-                Deleting...
-              </>
-            ) : (
-              <>
-                <Trash2 className="w-4 h-4" />
-                Delete Project
-              </>
-            )}
-          </button>
-        </div>
+            <div className="flex gap-3">
+              <button
+                type="button"
+                onClick={onClose}
+                disabled={loading}
+                className="flex-1 px-4 py-2.5 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition-colors disabled:opacity-50 font-medium"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={onConfirm}
+                disabled={loading}
+                className="flex-1 px-4 py-2.5 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors disabled:opacity-50 flex items-center justify-center gap-2 font-medium"
+              >
+                {loading ? (
+                  <>
+                    <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
+                    Deleting...
+                  </>
+                ) : (
+                  <>
+                    <Trash2 className="w-4 h-4" />
+                    Delete Project
+                  </>
+                )}
+              </button>
+            </div>
+          </>
+        ) : (
+          <>
+            <div className="flex items-center gap-3 mb-4">
+              <div className="w-11 h-11 bg-amber-50 rounded-full flex items-center justify-center">
+                <AlertCircle className="w-5 h-5 text-amber-600" />
+              </div>
+              <div>
+                <h2 className="text-xl font-bold text-gray-900">Permission Denied</h2>
+                <p className="text-sm text-gray-500">You cannot delete this project</p>
+              </div>
+            </div>
+
+            <div className="mb-6">
+              <p className="text-gray-700 mb-4">
+                You don't have permission to delete <strong className="text-gray-900">{project.name}</strong>.
+              </p>
+              <div className="bg-amber-50 border border-amber-200 rounded-lg p-4">
+                <div className="flex items-start gap-3">
+                  <AlertCircle className="w-5 h-5 text-amber-600 flex-shrink-0 mt-0.5" />
+                  <div>
+                    <p className="text-sm text-amber-900 font-medium mb-2">
+                      Your current role: <span className="font-bold">{project.userRole}</span>
+                    </p>
+                    <p className="text-sm text-amber-800">
+                      Only <strong>owners</strong> can delete projects. Please contact the project owner if you need this project deleted.
+                    </p>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div className="flex justify-end">
+              <button
+                type="button"
+                onClick={onClose}
+                className="px-4 py-2.5 bg-gray-900 text-white rounded-lg hover:bg-gray-800 transition-colors font-medium"
+              >
+                Got It
+              </button>
+            </div>
+          </>
+        )}
       </div>
     </div>
   );

@@ -133,12 +133,13 @@ export const useProjectStore = create((set, get) => ({
 
       if (fetchError) throw fetchError;
 
+      // Create a new object WITHOUT the id field
+      // Also remove created_at and updated_at to let DB generate them
+      const { id, created_at, updated_at, ...pageWithoutId } = originalPage;
+
       const duplicatedPage = {
-        ...originalPage,
-        id: undefined,
+        ...pageWithoutId,
         title: `${originalPage.title} (Copy)`,
-        created_at: new Date().toISOString(),
-        updated_at: new Date().toISOString()
       };
 
       const { data, error } = await supabase

@@ -159,7 +159,7 @@ export const supabaseHelpers = {
           pages (
             id,
             title,
-            emoji,
+            icon,
             updated_at
           )
         `)
@@ -254,6 +254,9 @@ export const supabaseHelpers = {
       })));
     
     if (columnsError) throw columnsError;
+
+    // Clear the user projects cache so it refreshes
+    this.clearUserProjectsCache(userId);
 
     return project;
   },
@@ -395,34 +398,38 @@ export const supabaseHelpers = {
     }
 
     try {
-      const [projectResult, pagesResult, memberResult] = await Promise.all([
-        supabase
-          .from('projects')
-          .select('id, name, description, icon, color, created_at, created_by')
-          .eq('id', projectId)
-          .single(),
-        
-        supabase
-          .from('pages')
-          .select('id, title, emoji, updated_at, parent_id, created_by')
-          .eq('project_id', projectId)
-          .order('updated_at', { ascending: false }),
-        
-        supabase
-          .from('project_members')
-          .select('role')
-          .eq('project_id', projectId)
-          .eq('user_id', userId)
-          .single()
-      ]);
+      // Fetch project
+      const { data: project, error: projectError } = await supabase
+        .from('projects')
+        .select('id, name, description, icon, color, created_at, created_by')
+        .eq('id', projectId)
+        .single();
 
-      if (projectResult.error) throw projectResult.error;
-      if (memberResult.error) throw memberResult.error;
+      if (projectError) throw projectError;
+
+      // Fetch pages separately to avoid ordering issues
+      const { data: pages, error: pagesError } = await supabase
+        .from('pages')
+        .select('id, title, icon, updated_at, parent_id, created_by, position')
+        .eq('project_id', projectId)
+        .order('position', { ascending: true });
+
+      if (pagesError) throw pagesError;
+
+      // Fetch member role
+      const { data: member, error: memberError } = await supabase
+        .from('project_members')
+        .select('role')
+        .eq('project_id', projectId)
+        .eq('user_id', userId)
+        .single();
+
+      if (memberError) throw memberError;
 
       const data = {
-        ...projectResult.data,
-        pages: pagesResult.data || [],
-        userRole: memberResult.data?.role || 'viewer'
+        ...project,
+        pages: pages || [],
+        userRole: member?.role || 'viewer'
       };
 
       projectDetailsCache.set(cacheKey, {
@@ -432,6 +439,7 @@ export const supabaseHelpers = {
 
       return data;
     } catch (error) {
+      console.error('Error in getProjectWithPages:', error);
       throw error;
     }
   },
@@ -463,6 +471,7 @@ export const supabaseHelpers = {
 
       return data || [];
     } catch (error) {
+      console.error('Error fetching activities:', error);
       return [];
     }
   },

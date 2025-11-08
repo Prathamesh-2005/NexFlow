@@ -2,8 +2,6 @@
 
 A modern, real-time collaborative project management platform combining Confluence-style documentation with Jira-style kanban boards, built with React and Supabase.
 
-![NexFlow Banner](./docs/images/logo.png)
-
 ## 🚀 Features
 
 ### 📝 Rich Document Editor

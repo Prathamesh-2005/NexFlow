@@ -1,8 +1,8 @@
-# FrontCort - Collaborative Project Management Platform
+# NexFlow - Collaborative Project Management Platform
 
 A modern, real-time collaborative project management platform combining Confluence-style documentation with Jira-style kanban boards, built with React and Supabase.
 
-![FrontCort Banner](https://via.placeholder.com/1200x300/1F2937/FFFFFF?text=FrontCort)
+![NexFlow Banner](./docs/images/logo.png)
 
 ## 🚀 Features
 
@@ -78,14 +78,43 @@ Real-time features include collaborative editing with live cursors, presence tra
 
 ### Installation
 
-1. Clone the repository
-2. Install dependencies with `npm install`
-3. Create a Supabase project
-4. Run database migrations from `/docs/database-schema.sql`
-5. Configure `.env` with your Supabase credentials
-6. Start development server with `npm run dev`
+1. **Clone the repository**
 
-Visit `http://localhost:5173` to see the app.
+```bash
+git clone https://github.com/Prathamesh-2005/NexFlow.git
+cd frontcort
+```
+
+2. **Install dependencies**
+
+```bash
+npm install
+```
+
+3. **Setup Supabase**
+
+   - Create a new project at [supabase.com](https://supabase.com)
+   - Copy your project URL and anon key
+   - Run the SQL schema from `/docs/database-schema.sql` in Supabase SQL Editor
+
+4. **Configure environment**
+
+Create `.env` file:
+
+```env
+VITE_SUPABASE_URL=https://your-project.supabase.co
+VITE_SUPABASE_ANON_KEY=your-anon-key-here
+```
+
+5. **Start the app**
+
+```bash
+npm run dev
+```
+
+6. **Open browser**
+   - Visit `http://localhost:5173`
+   - Sign up and create your first project!
 
 ## 🚀 Deployment
 

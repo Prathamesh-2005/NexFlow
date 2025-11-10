@@ -2,7 +2,7 @@ import * as Y from 'yjs';
 
 export class ChangeTracker {
   constructor() {
-    this.changes = new Map(); // userId -> { positions: Set, color: string, name: string, timestamp: number }
+    this.changes = new Map(); 
     this.cleanupTimeouts = new Map();
   }
 

@@ -30,7 +30,7 @@ const COLORS = ['#FF6B6B', '#4ECDC4', '#45B7D1', '#FFA07A', '#98D8C8', '#F7DC6F'
 
 export const getRandomColor = () => COLORS[Math.floor(Math.random() * COLORS.length)];
 
-// Image upload handler with enhanced logging
+// Image upload handler
 export const uploadImage = async (file, toast) => {
   console.log('🖼️ Starting image upload:', {
     name: file.name,
@@ -39,28 +39,24 @@ export const uploadImage = async (file, toast) => {
   });
 
   try {
-    // Validate file
     if (!file.type.startsWith('image/')) {
       const error = 'File must be an image';
       console.error('❌ Upload failed:', error);
       throw new Error(error);
     }
 
-    // Max 5MB
     if (file.size > 5 * 1024 * 1024) {
       const error = 'Image must be less than 5MB';
       console.error('❌ Upload failed:', error);
       throw new Error(error);
     }
 
-    // Generate unique filename
     const fileExt = file.name.split('.').pop();
     const fileName = `${Math.random().toString(36).substring(2)}-${Date.now()}.${fileExt}`;
     const filePath = fileName;
 
     console.log('📤 Uploading to Supabase:', filePath);
 
-    // Upload to Supabase storage
     const { data, error } = await supabase.storage
       .from('page-images')
       .upload(filePath, file, {
@@ -75,7 +71,6 @@ export const uploadImage = async (file, toast) => {
 
     console.log('✅ Upload successful:', data);
 
-    // Get public URL
     const { data: { publicUrl } } = supabase.storage
       .from('page-images')
       .getPublicUrl(filePath);
@@ -96,7 +91,7 @@ export const uploadImage = async (file, toast) => {
   }
 };
 
-// Custom Image extension with enhanced upload support and logging
+// Custom Image extension
 const CustomImage = Image.extend({
   addAttributes() {
     return {
@@ -157,68 +152,30 @@ const CustomImage = Image.extend({
   addCommands() {
     return {
       ...this.parent?.(),
-      setImage: (options) => ({ commands, state }) => {
+      setImage: (options) => ({ commands }) => {
         console.log('🎨 Inserting image into editor:', options);
-        
-        const { selection } = state;
-        const position = selection.$head ? selection.$head.pos : 0;
-        
-        console.log('📍 Insert position:', position);
-        
-        const result = commands.insertContent({
+        return commands.insertContent({
           type: this.name,
           attrs: options,
         });
-        
-        console.log('✅ Image insertion result:', result);
-        return result;
       },
       uploadAndInsertImage: (file, toast) => async ({ editor }) => {
         console.log('🚀 Starting uploadAndInsertImage command');
         
         try {
-          // Show loading toast
           if (toast) {
             toast.info('Uploading image...');
           }
 
-          // Upload image first
           const url = await uploadImage(file, toast);
-
           console.log('🎯 Image uploaded, URL:', url);
 
-          // Insert image using setImage command (without focus)
-          // We'll handle focus separately in the toolbar
           const success = editor.commands.setImage({ 
             src: url,
             alt: file.name,
           });
 
           console.log('📝 Image insertion command success:', success);
-
-          if (success) {
-            console.log('✅ Image inserted successfully into editor');
-            
-            // Verify the image is in the document
-            setTimeout(() => {
-              const html = editor.getHTML();
-              const hasImage = html.includes('<img');
-              const imgMatch = html.match(/<img[^>]*src="([^"]*)"[^>]*>/);
-              console.log('📄 Editor HTML verification:', {
-                hasImage,
-                imageUrl: imgMatch ? imgMatch[1] : 'NO IMAGE FOUND',
-                fullHTML: html,
-                htmlLength: html.length
-              });
-              
-              // Check if image is actually in the DOM
-              const editorImages = document.querySelectorAll('.ProseMirror img');
-              console.log('🖼️ Images in DOM:', editorImages.length, Array.from(editorImages).map(img => img.src));
-            }, 100);
-          } else {
-            console.error('❌ Image insertion command returned false');
-          }
-
           return success;
         } catch (error) {
           console.error('❌ Upload and insert failed:', error);
@@ -241,7 +198,6 @@ const CustomImage = Image.extend({
               console.log('📦 Drop event detected');
               
               const hasFiles = event.dataTransfer?.files?.length;
-
               if (!hasFiles) {
                 console.log('⏭️ No files in drop event');
                 return false;
@@ -252,7 +208,6 @@ const CustomImage = Image.extend({
               );
 
               console.log('🖼️ Images found in drop:', images.length);
-
               if (images.length === 0) {
                 return false;
               }
@@ -267,11 +222,9 @@ const CustomImage = Image.extend({
 
               console.log('📍 Drop coordinates:', coordinates);
 
-              images.forEach(async (image, index) => {
+              images.forEach(async (image) => {
                 try {
-                  console.log(`📤 Processing dropped image ${index + 1}/${images.length}`);
                   const url = await uploadImage(image);
-                  
                   console.log('✅ Upload complete, inserting at position:', coordinates.pos);
                   
                   const node = schema.nodes.image.create({ 
@@ -294,7 +247,6 @@ const CustomImage = Image.extend({
               console.log('📋 Paste event detected');
               
               const hasFiles = event.clipboardData?.files?.length;
-
               if (!hasFiles) {
                 console.log('⏭️ No files in paste event');
                 return false;
@@ -305,18 +257,15 @@ const CustomImage = Image.extend({
               );
 
               console.log('🖼️ Images found in paste:', images.length);
-
               if (images.length === 0) {
                 return false;
               }
 
               event.preventDefault();
 
-              images.forEach(async (image, index) => {
+              images.forEach(async (image) => {
                 try {
-                  console.log(`📤 Processing pasted image ${index + 1}/${images.length}`);
                   const url = await uploadImage(image);
-                  
                   console.log('✅ Upload complete, inserting via paste');
                   
                   const node = view.state.schema.nodes.image.create({ 
@@ -369,16 +318,13 @@ export const CustomCursors = Extension.create({
           },
           
           apply(tr, oldSet, oldState, newState) {
-            // Map existing decorations through the transaction
             let set = oldSet.map(tr.mapping, tr.doc);
             
-            // Get fresh cursors from extension options
             const cursors = extension.options.cursors || {};
             const cursorCount = Object.keys(cursors).length;
             
-            console.log('🎨 Rendering cursors:', cursorCount, cursors);
+            console.log('🎨 Rendering cursors:', cursorCount);
             
-            // Clear old decorations and rebuild from scratch
             const decorations = [];
             
             Object.entries(cursors).forEach(([userId, cursor]) => {
@@ -387,23 +333,17 @@ export const CustomCursors = Extension.create({
                 return;
               }
 
-              // Map the cursor position through any document changes
               let mappedPosition = cursor.position;
               
-              // If there's a transaction mapping, apply it
               if (tr.mapping) {
                 try {
                   mappedPosition = tr.mapping.map(cursor.position);
                 } catch (e) {
-                  // If mapping fails, use original position
                   console.warn(`⚠️ Failed to map cursor position for ${cursor.name}:`, e);
                 }
               }
 
-              // Validate mapped position is within document bounds
               if (mappedPosition < 0 || mappedPosition > newState.doc.content.size) {
-                console.warn(`⚠️ Cursor position ${mappedPosition} out of bounds for ${cursor.name} (doc size: ${newState.doc.content.size})`);
-                // Clamp to valid range
                 mappedPosition = Math.max(0, Math.min(mappedPosition, newState.doc.content.size));
               }
 
@@ -444,11 +384,10 @@ export const CustomCursors = Extension.create({
                   return wrapper;
                 }, {
                   key: `cursor-${userId}`,
-                  side: 1, // Place cursor after the position
+                  side: 1,
                 });
 
                 decorations.push(decoration);
-                console.log(`✅ Rendered cursor for ${cursor.name} at ${mappedPosition}`);
               } catch (error) {
                 console.error(`❌ Failed to create cursor decoration for ${userId}:`, error);
               }
@@ -469,7 +408,6 @@ export const CustomCursors = Extension.create({
             update: (view) => {
               const { from } = view.state.selection;
               
-              // Throttle cursor broadcasts (max once per 100ms)
               if (from !== lastBroadcastPosition) {
                 if (broadcastTimeout) {
                   clearTimeout(broadcastTimeout);
@@ -497,14 +435,12 @@ export const CustomCursors = Extension.create({
   },
 });
 
-// In your editorConfig.js, update the getEditorExtensions function signature:
-
 export function getEditorExtensions(yDoc, mentionUsers = [], currentUser = null) {
   const extensions = [
     StarterKit.configure({
       history: false, // Y.js handles history
-      codeBlock: false,
-      horizontalRule: false,
+      codeBlock: false, // DISABLED - Using CodeBlockLowlight instead
+      horizontalRule: false, // Using custom HorizontalRule
     }),
     Underline,
     Link.configure({ 
@@ -559,7 +495,7 @@ export function getEditorExtensions(yDoc, mentionUsers = [], currentUser = null)
     CodeBlockLowlight.configure({
       lowlight,
       HTMLAttributes: {
-        class: 'bg-gray-900 text-gray-100 rounded-md p-4 my-4 overflow-x-auto',
+        class: 'bg-gray-900 text-gray-100 rounded-md p-4 my-4 overflow-x-auto font-mono text-sm',
       },
     }),
     Placeholder.configure({
@@ -650,21 +586,19 @@ export function getEditorExtensions(yDoc, mentionUsers = [], currentUser = null)
     }),
   ];
 
-  // Add Y.js Collaboration with currentUser info
+  // Add Y.js Collaboration
   if (yDoc) {
     extensions.push(
       Collaboration.configure({
         document: yDoc,
+        field: 'default',
       })
     );
-
-    // Note: CollaborationCursor requires a provider, which we're not using
-    // since we're handling collaboration through Supabase Realtime
-    // The cursor/edit tracking is handled through our custom implementation
   }
 
   return extensions;
 }
+
 export const editorProps = {
   attributes: {
     class: 'prose prose-slate max-w-none focus:outline-none px-8 py-6 min-h-[500px]',

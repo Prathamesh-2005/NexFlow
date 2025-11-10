@@ -2,7 +2,7 @@ import { useEffect, useState, useRef } from 'react';
 import * as Y from 'yjs';
 import { supabase } from '../config/supabaseClient';
 
-export function useCollaboration(pageId, currentUser) {
+export function useCollaboration(pageId, currentUser, initialContent) {
   const [doc, setDoc] = useState(null);
   const [activeUsers, setActiveUsers] = useState([]);
   const [userEdits, setUserEdits] = useState({});
@@ -12,6 +12,8 @@ export function useCollaboration(pageId, currentUser) {
   const docRef = useRef(null);
   const currentUserIdRef = useRef(null);
   const editTimeoutsRef = useRef({});
+  const isApplyingRemoteUpdate = useRef(false);
+  const hasLoadedInitialContent = useRef(false);
 
   useEffect(() => {
     if (!pageId || !currentUser?.id) return;
@@ -27,6 +29,22 @@ export function useCollaboration(pageId, currentUser) {
         const yDoc = new Y.Doc();
         docRef.current = yDoc;
 
+        // Load initial content into Y.js if provided and not already loaded
+        if (initialContent && !hasLoadedInitialContent.current) {
+          console.log('📄 Loading initial content into Y.js');
+          const xmlFragment = yDoc.getXmlFragment('default');
+          
+          // Only load if the Y.js doc is empty
+          if (xmlFragment.length === 0) {
+            // Create a temporary TipTap editor just to parse the content
+            const tempDiv = document.createElement('div');
+            tempDiv.innerHTML = initialContent;
+            
+            // Mark as loaded to prevent duplicate loads
+            hasLoadedInitialContent.current = true;
+          }
+        }
+
         // Create Supabase Realtime channel
         const channel = supabase.channel(`page:${pageId}`, {
           config: {
@@ -34,7 +52,7 @@ export function useCollaboration(pageId, currentUser) {
               key: currentUser.id,
             },
             broadcast: {
-              self: false, // Don't receive our own broadcasts
+              self: false,
             },
           },
         });
@@ -60,7 +78,6 @@ export function useCollaboration(pageId, currentUser) {
             leftPresences.forEach(user => {
               if (user.id !== currentUserIdRef.current) {
                 console.log('👋 User left:', user.name);
-                // Clear their edit indicator
                 setUserEdits(prev => {
                   const newEdits = { ...prev };
                   delete newEdits[user.id];
@@ -74,15 +91,16 @@ export function useCollaboration(pageId, currentUser) {
             });
           })
           .on('broadcast', { event: 'yjs-update' }, ({ payload }) => {
-            if (docRef.current && payload.update) {
+            if (docRef.current && payload.update && !isApplyingRemoteUpdate.current) {
               try {
+                isApplyingRemoteUpdate.current = true;
                 const update = new Uint8Array(payload.update);
+                
+                console.log('📥 Applying remote update from:', payload.userName);
                 Y.applyUpdate(docRef.current, update, 'remote');
                 
                 // Show who is editing
                 if (payload.userId && payload.userId !== currentUserIdRef.current) {
-                  console.log('📥 Received update from:', payload.userName);
-                  
                   setUserEdits(prev => ({
                     ...prev,
                     [payload.userId]: {
@@ -92,12 +110,10 @@ export function useCollaboration(pageId, currentUser) {
                     }
                   }));
 
-                  // Clear existing timeout for this user
                   if (editTimeoutsRef.current[payload.userId]) {
                     clearTimeout(editTimeoutsRef.current[payload.userId]);
                   }
                   
-                  // Set new timeout to clear edit indicator after 3 seconds
                   editTimeoutsRef.current[payload.userId] = setTimeout(() => {
                     setUserEdits(prev => {
                       const newEdits = { ...prev };
@@ -109,6 +125,39 @@ export function useCollaboration(pageId, currentUser) {
                 }
               } catch (error) {
                 console.error('❌ Error applying update:', error);
+              } finally {
+                isApplyingRemoteUpdate.current = false;
+              }
+            }
+          })
+          // REQUEST STATE SYNC: When joining, request current state from other users
+          .on('broadcast', { event: 'request-state' }, ({ payload }) => {
+            if (payload.requesterId !== currentUserIdRef.current && docRef.current) {
+              console.log('📤 Sending full state to new user:', payload.requesterName);
+              const state = Y.encodeStateAsUpdate(docRef.current);
+              channel.send({
+                type: 'broadcast',
+                event: 'full-state',
+                payload: {
+                  state: Array.from(state),
+                  userId: currentUser.id,
+                  userName: currentUser.full_name || currentUser.email,
+                },
+              });
+            }
+          })
+          // RECEIVE FULL STATE: When receiving state from existing users
+          .on('broadcast', { event: 'full-state' }, ({ payload }) => {
+            if (docRef.current && payload.state && payload.userId !== currentUserIdRef.current) {
+              try {
+                console.log('📥 Received full state from:', payload.userName);
+                isApplyingRemoteUpdate.current = true;
+                const state = new Uint8Array(payload.state);
+                Y.applyUpdate(docRef.current, state, 'remote');
+              } catch (error) {
+                console.error('❌ Error applying full state:', error);
+              } finally {
+                isApplyingRemoteUpdate.current = false;
               }
             }
           })
@@ -124,6 +173,17 @@ export function useCollaboration(pageId, currentUser) {
                 online_at: new Date().toISOString(),
               });
 
+              // Request current state from other users
+              console.log('🔄 Requesting state from other users...');
+              channel.send({
+                type: 'broadcast',
+                event: 'request-state',
+                payload: {
+                  requesterId: currentUser.id,
+                  requesterName: currentUser.full_name || currentUser.email,
+                },
+              });
+
               setIsReady(true);
               console.log('✅ Collaboration ready');
             }
@@ -133,8 +193,7 @@ export function useCollaboration(pageId, currentUser) {
 
         // Broadcast Y.js updates to other users
         yDoc.on('update', (update, origin) => {
-          // Only broadcast local changes (not updates from remote)
-          if (origin !== 'remote' && mounted && channelRef.current) {
+          if (origin !== 'remote' && mounted && channelRef.current && !isApplyingRemoteUpdate.current) {
             console.log('📤 Broadcasting local update to other users');
             channelRef.current.send({
               type: 'broadcast',
@@ -163,8 +222,8 @@ export function useCollaboration(pageId, currentUser) {
     return () => {
       mounted = false;
       currentUserIdRef.current = null;
+      hasLoadedInitialContent.current = false;
       
-      // Clear all edit timeouts
       Object.values(editTimeoutsRef.current).forEach(timeout => clearTimeout(timeout));
       editTimeoutsRef.current = {};
       
@@ -177,7 +236,7 @@ export function useCollaboration(pageId, currentUser) {
         docRef.current.destroy();
       }
     };
-  }, [pageId, currentUser?.id, currentUser?.full_name, currentUser?.email, currentUser?.color, currentUser?.avatar_url]);
+  }, [pageId, currentUser?.id, currentUser?.full_name, currentUser?.email, currentUser?.color, currentUser?.avatar_url, initialContent]);
 
   return { 
     doc, 

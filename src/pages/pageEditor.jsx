@@ -30,41 +30,50 @@ function CollaborativeEditor({
   currentUser,
   onLocalEdit,
 }) {
-  const hasSetInitialContent = useRef(false);
-  const isEditorReady = useRef(false);
-  const lastContentRef = useRef('');
+  const hasInitialized = useRef(false);
+  const isSettingContent = useRef(false);
   
   const editor = useEditor({
     extensions: getEditorExtensions(doc, mentionUsers, currentUser),
     editorProps,
     editable: canEdit,
     autofocus: canEdit,
-    content: initialContent || '',
+    content: '', // Start empty, let Y.js handle content
     onCreate: ({ editor }) => {
       console.log('📝 Editor created');
-      isEditorReady.current = true;
-      lastContentRef.current = editor.getHTML();
+      
+      // Only set initial content if Y.js document is empty
+      if (doc && initialContent && !hasInitialized.current) {
+        const xmlFragment = doc.getXmlFragment('default');
+        if (xmlFragment.length === 0) {
+          console.log('🔄 Setting initial content to empty Y.js doc');
+          isSettingContent.current = true;
+          editor.commands.setContent(initialContent);
+          isSettingContent.current = false;
+          hasInitialized.current = true;
+        } else {
+          console.log('✅ Y.js doc already has content, skipping initial content');
+          hasInitialized.current = true;
+        }
+      }
     },
     onUpdate: ({ editor }) => {
-      if (canEdit && isEditorReady.current) {
+      if (canEdit && !isSettingContent.current) {
         const html = editor.getHTML();
         console.log('📝 Local edit detected');
         onUpdate(html);
         onLocalEdit?.();
-        lastContentRef.current = html;
       }
     },
-  }, []);
+  }, [doc]); // Only recreate editor when doc changes
 
-  // Listen for Y.js document changes (from remote users)
+  // Update editor content when Y.js changes (from remote users)
   useEffect(() => {
     if (!doc || !editor) return;
 
     const handleYjsUpdate = () => {
-      const newContent = editor.getHTML();
-      if (newContent !== lastContentRef.current) {
-        console.log('📥 Remote change detected in editor');
-        lastContentRef.current = newContent;
+      if (!isSettingContent.current) {
+        console.log('📥 Remote change detected, triggering callback');
         onRemoteChange?.();
       }
     };
@@ -75,15 +84,6 @@ function CollaborativeEditor({
       doc.off('update', handleYjsUpdate);
     };
   }, [doc, editor, onRemoteChange]);
-
-  useEffect(() => {
-    if (editor && initialContent && !hasSetInitialContent.current && isEditorReady.current) {
-      console.log('🔄 Setting initial content');
-      editor.commands.setContent(initialContent);
-      hasSetInitialContent.current = true;
-      lastContentRef.current = initialContent;
-    }
-  }, [editor, initialContent]);
 
   useEffect(() => {
     if (editor && editorInstance) {
@@ -149,7 +149,8 @@ export default function PageEditor() {
 
   const { doc, activeUsers, userEdits, isReady: collabReady, channel } = useCollaboration(
     pageId,
-    currentUser
+    currentUser,
+    initialContent  
   );
 
   // Handle local edits
@@ -169,6 +170,11 @@ export default function PageEditor() {
   // Handle remote changes
   const handleRemoteChange = () => {
     console.log('🌍 Remote user made a change');
+    // Get current content from editor for saving
+    if (editorRef.current) {
+      const currentContent = editorRef.current.getHTML();
+      editorContentRef.current = currentContent;
+    }
   };
 
   // Online status tracking
@@ -639,7 +645,6 @@ export default function PageEditor() {
         </div>
       )}
 
-      {/* Current user editing indicator */}
       {currentUserEditing && (
         <div className="bg-blue-50 border-b border-blue-200 px-6 py-2">
           <div className="flex items-center gap-2">
@@ -651,7 +656,6 @@ export default function PageEditor() {
         </div>
       )}
 
-      {/* Other users editing indicators */}
       {Object.entries(userEdits).map(([userId, edit]) => (
         <div 
           key={userId}

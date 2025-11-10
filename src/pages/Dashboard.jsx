@@ -49,6 +49,7 @@ export default function Dashboard() {
   const [showProfileSettings, setShowProfileSettings] = useState(false);
   const [deleteConfirm, setDeleteConfirm] = useState(null);
   const [avatarError, setAvatarError] = useState(false);
+  const [signingOut, setSigningOut] = useState(false);
   const userMenuRef = useRef(null);
   const hasLoadedRef = useRef(false);
 
@@ -275,13 +276,32 @@ export default function Dashboard() {
 
                     <button
                       onClick={async () => {
-                        await signOut();
-                        navigate('/login');
+                        try {
+                          setSigningOut(true);
+                          toast.success('Signing out...');
+                          await signOut();
+                          toast.success('Signed out successfully');
+                          navigate('/login');
+                        } catch (error) {
+                          console.error('Sign out error:', error);
+                          toast.error('Failed to sign out');
+                          setSigningOut(false);
+                        }
                       }}
-                      className="w-full px-4 py-2.5 text-left hover:bg-red-50 transition-colors flex items-center gap-3 text-sm text-red-600"
+                      disabled={signingOut}
+                      className="w-full px-4 py-2.5 text-left hover:bg-red-50 transition-colors flex items-center gap-3 text-sm text-red-600 disabled:opacity-50 disabled:cursor-not-allowed"
                     >
-                      <LogOut className="w-4 h-4" />
-                      Sign Out
+                      {signingOut ? (
+                        <>
+                          <div className="w-4 h-4 border-2 border-red-600 border-t-transparent rounded-full animate-spin"></div>
+                          Signing out...
+                        </>
+                      ) : (
+                        <>
+                          <LogOut className="w-4 h-4" />
+                          Sign Out
+                        </>
+                      )}
                     </button>
                   </div>
                 )}
